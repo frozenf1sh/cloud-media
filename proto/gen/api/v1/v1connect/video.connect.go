@@ -35,12 +35,25 @@ const (
 const (
 	// VideoServiceSubmitTaskProcedure is the fully-qualified name of the VideoService's SubmitTask RPC.
 	VideoServiceSubmitTaskProcedure = "/api.v1.VideoService/SubmitTask"
+	// VideoServiceGetTaskStatusProcedure is the fully-qualified name of the VideoService's
+	// GetTaskStatus RPC.
+	VideoServiceGetTaskStatusProcedure = "/api.v1.VideoService/GetTaskStatus"
+	// VideoServiceListTasksProcedure is the fully-qualified name of the VideoService's ListTasks RPC.
+	VideoServiceListTasksProcedure = "/api.v1.VideoService/ListTasks"
+	// VideoServiceCancelTaskProcedure is the fully-qualified name of the VideoService's CancelTask RPC.
+	VideoServiceCancelTaskProcedure = "/api.v1.VideoService/CancelTask"
 )
 
 // VideoServiceClient is a client for the api.v1.VideoService service.
 type VideoServiceClient interface {
 	// 提交视频转码任务
 	SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error)
+	// 获取任务状态
+	GetTaskStatus(context.Context, *connect.Request[v1.GetTaskStatusRequest]) (*connect.Response[v1.GetTaskStatusResponse], error)
+	// 列出任务
+	ListTasks(context.Context, *connect.Request[v1.ListTasksRequest]) (*connect.Response[v1.ListTasksResponse], error)
+	// 取消任务
+	CancelTask(context.Context, *connect.Request[v1.CancelTaskRequest]) (*connect.Response[v1.CancelTaskResponse], error)
 }
 
 // NewVideoServiceClient constructs a client for the api.v1.VideoService service. By default, it
@@ -58,12 +71,30 @@ func NewVideoServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			baseURL+VideoServiceSubmitTaskProcedure,
 			opts...,
 		),
+		getTaskStatus: connect.NewClient[v1.GetTaskStatusRequest, v1.GetTaskStatusResponse](
+			httpClient,
+			baseURL+VideoServiceGetTaskStatusProcedure,
+			opts...,
+		),
+		listTasks: connect.NewClient[v1.ListTasksRequest, v1.ListTasksResponse](
+			httpClient,
+			baseURL+VideoServiceListTasksProcedure,
+			opts...,
+		),
+		cancelTask: connect.NewClient[v1.CancelTaskRequest, v1.CancelTaskResponse](
+			httpClient,
+			baseURL+VideoServiceCancelTaskProcedure,
+			opts...,
+		),
 	}
 }
 
 // videoServiceClient implements VideoServiceClient.
 type videoServiceClient struct {
-	submitTask *connect.Client[v1.SubmitTaskRequest, v1.SubmitTaskResponse]
+	submitTask    *connect.Client[v1.SubmitTaskRequest, v1.SubmitTaskResponse]
+	getTaskStatus *connect.Client[v1.GetTaskStatusRequest, v1.GetTaskStatusResponse]
+	listTasks     *connect.Client[v1.ListTasksRequest, v1.ListTasksResponse]
+	cancelTask    *connect.Client[v1.CancelTaskRequest, v1.CancelTaskResponse]
 }
 
 // SubmitTask calls api.v1.VideoService.SubmitTask.
@@ -71,10 +102,31 @@ func (c *videoServiceClient) SubmitTask(ctx context.Context, req *connect.Reques
 	return c.submitTask.CallUnary(ctx, req)
 }
 
+// GetTaskStatus calls api.v1.VideoService.GetTaskStatus.
+func (c *videoServiceClient) GetTaskStatus(ctx context.Context, req *connect.Request[v1.GetTaskStatusRequest]) (*connect.Response[v1.GetTaskStatusResponse], error) {
+	return c.getTaskStatus.CallUnary(ctx, req)
+}
+
+// ListTasks calls api.v1.VideoService.ListTasks.
+func (c *videoServiceClient) ListTasks(ctx context.Context, req *connect.Request[v1.ListTasksRequest]) (*connect.Response[v1.ListTasksResponse], error) {
+	return c.listTasks.CallUnary(ctx, req)
+}
+
+// CancelTask calls api.v1.VideoService.CancelTask.
+func (c *videoServiceClient) CancelTask(ctx context.Context, req *connect.Request[v1.CancelTaskRequest]) (*connect.Response[v1.CancelTaskResponse], error) {
+	return c.cancelTask.CallUnary(ctx, req)
+}
+
 // VideoServiceHandler is an implementation of the api.v1.VideoService service.
 type VideoServiceHandler interface {
 	// 提交视频转码任务
 	SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error)
+	// 获取任务状态
+	GetTaskStatus(context.Context, *connect.Request[v1.GetTaskStatusRequest]) (*connect.Response[v1.GetTaskStatusResponse], error)
+	// 列出任务
+	ListTasks(context.Context, *connect.Request[v1.ListTasksRequest]) (*connect.Response[v1.ListTasksResponse], error)
+	// 取消任务
+	CancelTask(context.Context, *connect.Request[v1.CancelTaskRequest]) (*connect.Response[v1.CancelTaskResponse], error)
 }
 
 // NewVideoServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -88,10 +140,31 @@ func NewVideoServiceHandler(svc VideoServiceHandler, opts ...connect.HandlerOpti
 		svc.SubmitTask,
 		opts...,
 	)
+	videoServiceGetTaskStatusHandler := connect.NewUnaryHandler(
+		VideoServiceGetTaskStatusProcedure,
+		svc.GetTaskStatus,
+		opts...,
+	)
+	videoServiceListTasksHandler := connect.NewUnaryHandler(
+		VideoServiceListTasksProcedure,
+		svc.ListTasks,
+		opts...,
+	)
+	videoServiceCancelTaskHandler := connect.NewUnaryHandler(
+		VideoServiceCancelTaskProcedure,
+		svc.CancelTask,
+		opts...,
+	)
 	return "/api.v1.VideoService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VideoServiceSubmitTaskProcedure:
 			videoServiceSubmitTaskHandler.ServeHTTP(w, r)
+		case VideoServiceGetTaskStatusProcedure:
+			videoServiceGetTaskStatusHandler.ServeHTTP(w, r)
+		case VideoServiceListTasksProcedure:
+			videoServiceListTasksHandler.ServeHTTP(w, r)
+		case VideoServiceCancelTaskProcedure:
+			videoServiceCancelTaskHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -103,4 +176,16 @@ type UnimplementedVideoServiceHandler struct{}
 
 func (UnimplementedVideoServiceHandler) SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.SubmitTask is not implemented"))
+}
+
+func (UnimplementedVideoServiceHandler) GetTaskStatus(context.Context, *connect.Request[v1.GetTaskStatusRequest]) (*connect.Response[v1.GetTaskStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.GetTaskStatus is not implemented"))
+}
+
+func (UnimplementedVideoServiceHandler) ListTasks(context.Context, *connect.Request[v1.ListTasksRequest]) (*connect.Response[v1.ListTasksResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.ListTasks is not implemented"))
+}
+
+func (UnimplementedVideoServiceHandler) CancelTask(context.Context, *connect.Request[v1.CancelTaskRequest]) (*connect.Response[v1.CancelTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.CancelTask is not implemented"))
 }

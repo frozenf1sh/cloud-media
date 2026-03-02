@@ -6,14 +6,65 @@ option go_package = "github.com/frozenf1sh/cloud-media/proto/gen/api/v1";
 service VideoService {
   // 提交视频转码任务
   rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse) {}
+  // 获取任务状态
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse) {}
+  // 列出任务
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {}
+  // 取消任务
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse) {}
 }
 
 message SubmitTaskRequest {
-  string task_id = 1;    // 任务ID
-  string video_key = 2;  // 模拟前端传来的 MinIO 文件路径
+  string task_id = 1;       // 任务ID
+  string source_bucket = 2; // 源文件存储桶
+  string source_key = 3;    // 源文件在 MinIO 中的路径
 }
 
 message SubmitTaskResponse {
+  string task_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message GetTaskStatusRequest {
+  string task_id = 1;
+}
+
+message GetTaskStatusResponse {
+  string task_id = 1;
+  string status = 2;
+  int32 progress = 3;
+  string source_bucket = 4;
+  string source_key = 5;
+  string error_message = 6;
+  int64 created_at = 7;
+  int64 started_at = 8;
+  int64 completed_at = 9;
+}
+
+message ListTasksRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListTasksResponse {
+  repeated TaskInfo tasks = 1;
+  int64 total = 2;
+}
+
+message TaskInfo {
+  string task_id = 1;
+  string status = 2;
+  int32 progress = 3;
+  string source_key = 4;
+  int64 created_at = 5;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message CancelTaskResponse {
   string task_id = 1;
   string status = 2;
   string message = 3;

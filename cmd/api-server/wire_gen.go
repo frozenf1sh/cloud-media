@@ -9,6 +9,7 @@ package main
 import (
 	"github.com/frozenf1sh/cloud-media/internal/adapter/rpc"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
+	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/usecase"
 	"github.com/google/wire"
 )
@@ -21,16 +22,29 @@ func InitializeVideoServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	videoUseCase := usecase.NewVideoUseCase(rabbitMQBroker)
+	config := provideDatabaseConfig()
+	db, err := persistence.NewGormDB(config)
+	if err != nil {
+		return nil, err
+	}
+	videoTaskRepository := persistence.NewVideoTaskRepository(db)
+	videoUseCase := usecase.NewVideoUseCase(rabbitMQBroker, videoTaskRepository)
 	videoServer := rpc.NewVideoServer(videoUseCase)
-	server := NewServer(videoServer)
+	database := persistence.NewDatabase(db)
+	server := NewServer(videoServer, database)
 	return server, nil
 }
 
 // wire.go:
 
-var handlerProviderSet = wire.NewSet(broker.ProviderSet, usecase.ProviderSet, rpc.ProviderSet, provideRabbitMQURL)
+var handlerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, usecase.ProviderSet, rpc.ProviderSet, provideRabbitMQURL,
+	provideDatabaseConfig,
+)
 
 func provideRabbitMQURL() string {
 	return "amqp://guest:guest@localhost:5672/"
+}
+
+func provideDatabaseConfig() *persistence.Config {
+	return persistence.NewDefaultConfig()
 }

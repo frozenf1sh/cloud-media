@@ -76,7 +76,7 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
 
-	log.Printf("Published task: TaskID=%s, VideoKey=%s", task.TaskID, task.VideoKey)
+	log.Printf("Published task: TaskID=%s, SourceKey=%s", task.TaskID, task.SourceKey)
 	return nil
 }
 
