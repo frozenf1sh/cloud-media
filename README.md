@@ -8,6 +8,7 @@
 - 🖼️ **封面自动生成** - 从视频第一帧提取缩略图
 - 📨 **异步任务处理** - 基于 RabbitMQ 的高并发任务队列
 - 💾 **持久化存储** - PostgreSQL 任务状态追踪
+- 📦 **对象存储** - MinIO 双 Endpoint 模式，支持内外网分离
 - 🔌 **整洁架构** - 领域驱动设计，依赖倒置
 
 ## 技术栈
@@ -17,7 +18,7 @@
 - **依赖注入**: [Google Wire](https://github.com/google/wire)
 - **ORM**: [GORM](https://gorm.io/)
 - **消息队列**: RabbitMQ
-- **对象存储**: MinIO
+- **对象存储**: MinIO（双 Endpoint 模式）
 - **数据库**: PostgreSQL
 - **容器化**: Docker Compose
 
@@ -44,7 +45,8 @@ cloud-media/
 │   │   └── rpc/                 # RPC 适配器
 │   └── infrastructure/          # 基础设施层 (Frameworks & Drivers)
 │       ├── broker/              # RabbitMQ
-│       └── persistence/         # PostgreSQL + GORM
+│       ├── persistence/         # PostgreSQL + GORM
+│       └── storage/             # MinIO 对象存储
 ├── proto/                        # Protobuf 定义
 ├── doc/                          # 文档
 │   ├── DATABASE_DESIGN.md       # 数据库设计文档
@@ -67,7 +69,7 @@ cloud-media/
 │  领域层 (Domain)             ◄──  VideoTask, Repository      │
 │                               ────  核心业务规则              │
 ├─────────────────────────────────────────────────────────────┤
-│  基础设施层 (Infrastructure) ◄──  PostgreSQL/RabbitMQ        │
+│  基础设施层 (Infrastructure) ◄──  PostgreSQL/RabbitMQ/MinIO  │
 │                               ────  GORM 实现                  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -78,6 +80,26 @@ cloud-media/
 - **task_status_logs** - 任务状态变更历史
 
 详见 [doc/DATABASE_DESIGN_V2.md](doc/DATABASE_DESIGN_V2.md)
+
+### MinIO 双 Endpoint 设计
+
+**亮点**
+
+采用**双客户端模式**，分离内外网：
+
+| 客户端 | Endpoint | 用途 |
+|---------|----------|------|
+| **coreClient** | 内网 | 上传、下载、Bucket 管理 |
+| **signerClient** | 外网 | 仅生成预签名 URL |
+
+**配置示例**：
+
+```go
+Config{
+    InternalEndpoint: "minio:9000",   // 内网
+    ExternalEndpoint: "", // 外网
+}
+```
 
 ## 快速开始
 
@@ -160,9 +182,9 @@ curl -X POST http://localhost:8080/api.v1.VideoService/CancelTask \
 ### 项目状态
 
 - ✅ Domain 层 - 完整
-- ✅ Infrastructure 层 - 数据库 + MQ 完成
+- ✅ Infrastructure 层 - 数据库 + MQ + MinIO 完成
 - ✅ API 层 - 完整
-- ⏳ MinIO 集成 - 待开发
+- ✅ MinIO 集成 - 已完成（双 Endpoint 模式）
 - ⏳ Worker 服务 - 待开发
 - ⏳ FFmpeg 转码 - 待开发
 

@@ -104,3 +104,17 @@ type VideoTaskRepository interface {
 type MQBroker interface {
 	PublishVideoTask(task *VideoTask) error
 }
+
+// ObjectStorage 对象存储接口 - 支持 MinIO、S3、阿里云 OSS 等
+type ObjectStorage interface {
+	// UploadFile 上传文件到指定存储桶
+	UploadFile(ctx context.Context, bucket, key string, data []byte) error
+	// DownloadFile 下载文件
+	DownloadFile(ctx context.Context, bucket, key string) ([]byte, error)
+	// GetPresignedURL 获取预签名 URL（用于分片上传/下载）
+	GetPresignedURL(ctx context.Context, bucket, key string, method string, expiry int64) (string, error)
+	// ListObjects 列出存储桶中的对象
+	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
+	// DeleteObject 删除对象
+	DeleteObject(ctx context.Context, bucket, key string) error
+}
