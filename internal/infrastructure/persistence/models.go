@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
@@ -14,8 +15,9 @@ type VideoTaskModel struct {
 	TaskID           string         `gorm:"size:64;uniqueIndex;not null"`
 	SourceKey        string         `gorm:"size:512;not null"`
 	SourceBucket     string         `gorm:"size:64;not null"`
-	TargetKey        string         `gorm:"size:512"`
-	TargetBucket     string         `gorm:"size:64"`
+	SourceSize       int64          // 源文件大小（字节）
+	SourceDuration   float64        // 源视频时长（秒）
+	OutputInfo       datatypes.JSON `gorm:"type:jsonb"` // 输出信息（支持 HLS）
 	Status           string         `gorm:"size:32;index;not null"`
 	Progress         uint8          `gorm:"default:0"`
 	TranscodeConfig  datatypes.JSON `gorm:"type:jsonb"`
@@ -37,17 +39,17 @@ func (VideoTaskModel) TableName() string {
 // ToDomain 转换为领域模型
 func (m *VideoTaskModel) ToDomain() *domain.VideoTask {
 	task := &domain.VideoTask{
-		ID:           m.ID,
-		TaskID:       m.TaskID,
-		SourceKey:    m.SourceKey,
-		SourceBucket: m.SourceBucket,
-		TargetKey:    m.TargetKey,
-		TargetBucket: m.TargetBucket,
-		Status:       domain.VideoTaskStatus(m.Status),
-		Progress:     int(m.Progress),
-		ErrorMessage: m.ErrorMessage,
-		CreatedAt:    m.CreatedAt.Unix(),
-		UpdatedAt:    m.UpdatedAt.Unix(),
+		ID:             m.ID,
+		TaskID:         m.TaskID,
+		SourceKey:      m.SourceKey,
+		SourceBucket:   m.SourceBucket,
+		SourceSize:     m.SourceSize,
+		SourceDuration: m.SourceDuration,
+		Status:         domain.VideoTaskStatus(m.Status),
+		Progress:       int(m.Progress),
+		ErrorMessage:   m.ErrorMessage,
+		CreatedAt:      m.CreatedAt.Unix(),
+		UpdatedAt:      m.UpdatedAt.Unix(),
 	}
 
 	if m.StartedAt != nil {
@@ -61,7 +63,18 @@ func (m *VideoTaskModel) ToDomain() *domain.VideoTask {
 
 	// 反序列化 TranscodeConfig
 	if len(m.TranscodeConfig) > 0 {
-		// TODO: 实现 JSON 反序列化
+		var config domain.TranscodeConfig
+		if err := json.Unmarshal(m.TranscodeConfig, &config); err == nil {
+			task.TranscodeConfig = &config
+		}
+	}
+
+	// 反序列化 OutputInfo
+	if len(m.OutputInfo) > 0 {
+		var outputInfo domain.OutputInfo
+		if err := json.Unmarshal(m.OutputInfo, &outputInfo); err == nil {
+			task.OutputInfo = &outputInfo
+		}
 	}
 
 	return task
@@ -70,15 +83,15 @@ func (m *VideoTaskModel) ToDomain() *domain.VideoTask {
 // FromDomain 从领域模型创建 GORM 模型
 func FromDomain(task *domain.VideoTask) *VideoTaskModel {
 	model := &VideoTaskModel{
-		ID:           task.ID,
-		TaskID:       task.TaskID,
-		SourceKey:    task.SourceKey,
-		SourceBucket: task.SourceBucket,
-		TargetKey:    task.TargetKey,
-		TargetBucket: task.TargetBucket,
-		Status:       string(task.Status),
-		Progress:     uint8(task.Progress),
-		ErrorMessage: task.ErrorMessage,
+		ID:             task.ID,
+		TaskID:         task.TaskID,
+		SourceKey:      task.SourceKey,
+		SourceBucket:   task.SourceBucket,
+		SourceSize:     task.SourceSize,
+		SourceDuration: task.SourceDuration,
+		Status:         string(task.Status),
+		Progress:       uint8(task.Progress),
+		ErrorMessage:   task.ErrorMessage,
 	}
 
 	if task.StartedAt != nil {
@@ -92,7 +105,16 @@ func FromDomain(task *domain.VideoTask) *VideoTaskModel {
 
 	// 序列化 TranscodeConfig
 	if task.TranscodeConfig != nil {
-		// TODO: 实现 JSON 序列化
+		if data, err := json.Marshal(task.TranscodeConfig); err == nil {
+			model.TranscodeConfig = datatypes.JSON(data)
+		}
+	}
+
+	// 序列化 OutputInfo
+	if task.OutputInfo != nil {
+		if data, err := json.Marshal(task.OutputInfo); err == nil {
+			model.OutputInfo = datatypes.JSON(data)
+		}
 	}
 
 	return model
