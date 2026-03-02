@@ -20,8 +20,9 @@ type VideoTask struct {
 	TaskID          string
 	SourceKey       string
 	SourceBucket    string
-	TargetKey       string
-	TargetBucket    string
+	SourceSize      int64           // 源文件大小（字节）
+	SourceDuration  float64         // 源视频时长（秒）
+	OutputInfo      *OutputInfo     // 输出信息（支持 HLS 多文件）
 	Status          VideoTaskStatus
 	Progress        int
 	TranscodeConfig *TranscodeConfig
@@ -30,6 +31,23 @@ type VideoTask struct {
 	UpdatedAt       int64
 	StartedAt       *int64
 	CompletedAt     *int64
+}
+
+// OutputInfo 输出信息（支持 HLS 多文件输出）
+type OutputInfo struct {
+	OutputBasePath  string          `json:"output_base_path"`  // 输出基路径
+	OutputBucket    string          `json:"output_bucket"`      // 输出存储桶
+	PlaylistPath    string          `json:"playlist_path"`      // 主播放列表路径（HLS master.m3u8）
+	ThumbnailPath   string          `json:"thumbnail_path"`     // 封面图路径
+	Variants        []VariantOutput `json:"variants"`           // 多码率变体
+	PreviewDuration float64         `json:"preview_duration"`   // 已可预览的时长（秒）
+}
+
+// VariantOutput HLS 多码率变体输出
+type VariantOutput struct {
+	Resolution   string `json:"resolution"`    // 分辨率，如 "1920x1080"
+	PlaylistPath string `json:"playlist_path"` // 该变体的播放列表路径
+	Bandwidth    int    `json:"bandwidth"`     // 码率（bps）
 }
 
 // TranscodeConfig 转码配置
