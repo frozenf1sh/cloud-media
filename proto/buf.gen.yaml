@@ -1,0 +1,20 @@
+version: v2
+
+inputs:
+  - directory: .
+
+plugins:
+  # 1. 生成标准的 Go 消息结构体
+  - remote: buf.build/protocolbuffers/go:v1.31.0 # pb
+    out: gen
+    opt: paths=source_relative
+
+  # 2. 生成 Connect-RPC 的 Go 代码
+  - remote: buf.build/connectrpc/go:v1.11.0 # go后端
+    out: gen
+    opt: paths=source_relative
+
+  # 3. (可选) 如果你以后需要生成验证逻辑，可以在这里加插件
+  # - plugin: buf.build/bufbuild/validate-go
+  #   out: gen
+  #   opt: paths=source_relative

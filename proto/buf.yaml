@@ -1,0 +1,8 @@
+version: v2
+name: buf.build/frozenf1sh/cloud-media-api
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
