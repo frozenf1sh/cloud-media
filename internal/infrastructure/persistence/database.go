@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/google/wire"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // ProviderSet 是 Wire 的提供者集合（等实现 repository 后再加入）
@@ -39,7 +40,7 @@ func NewGormDB(cfg *Config) (*gorm.DB, error) {
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.NewGormInfoLogger(),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
