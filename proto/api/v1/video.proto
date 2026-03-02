@@ -1,0 +1,20 @@
+syntax = "proto3";
+package api.v1;
+
+option go_package = "github.com/frozenf1sh/cloud-media/proto/gen/api/v1";
+
+service VideoService {
+  // 提交视频转码任务
+  rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse) {}
+}
+
+message SubmitTaskRequest {
+  string task_id = 1;    // 任务ID
+  string video_key = 2;  // 模拟前端传来的 MinIO 文件路径
+}
+
+message SubmitTaskResponse {
+  string task_id = 1;
+  string status = 2;
+  string message = 3;
+}
