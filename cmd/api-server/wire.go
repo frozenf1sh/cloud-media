@@ -9,6 +9,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/storage"
 	"github.com/frozenf1sh/cloud-media/internal/usecase"
+	"github.com/frozenf1sh/cloud-media/pkg/config"
 	"github.com/google/wire"
 )
 
@@ -24,26 +25,33 @@ var handlerProviderSet = wire.NewSet(
 	provideMinIOConfig,
 )
 
-func InitializeVideoServer() (*Server, error) {
+func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 	wire.Build(handlerProviderSet, NewServer)
 	return nil, nil
 }
 
-func provideRabbitMQURL() string {
-	return "amqp://guest:guest@localhost:5672/"
+func provideRabbitMQURL(cfg *config.Config) string {
+	return cfg.RabbitMQ.URL
 }
 
-func provideDatabaseConfig() *persistence.Config {
-	return persistence.NewDefaultConfig()
+func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
+	return &persistence.Config{
+		Host:     cfg.Database.Host,
+		Port:     cfg.Database.Port,
+		User:     cfg.Database.User,
+		Password: cfg.Database.Password,
+		DBName:   cfg.Database.DBName,
+		SSLMode:  cfg.Database.SSLMode,
+	}
 }
 
-func provideMinIOConfig() *storage.Config {
+func provideMinIOConfig(cfg *config.Config) *storage.Config {
 	return &storage.Config{
-		InternalEndpoint: "localhost:9000",
-		InternalUseSSL:  false,
-		ExternalEndpoint: "localhost:9000",
-		ExternalUseSSL:  false,
-		AccessKeyID:     "rootadmin",
-		SecretAccessKey: "rootpassword",
+		InternalEndpoint: cfg.MinIO.InternalEndpoint,
+		InternalUseSSL:  cfg.MinIO.InternalUseSSL,
+		ExternalEndpoint: cfg.MinIO.ExternalEndpoint,
+		ExternalUseSSL:  cfg.MinIO.ExternalUseSSL,
+		AccessKeyID:     cfg.MinIO.AccessKeyID,
+		SecretAccessKey: cfg.MinIO.SecretAccessKey,
 	}
 }

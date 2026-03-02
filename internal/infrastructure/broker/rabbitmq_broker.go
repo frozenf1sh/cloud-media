@@ -1,12 +1,14 @@
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/google/wire"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"log"
 )
 
 // ProviderSet 是 Wire 的提供者集合
@@ -56,6 +58,7 @@ func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
 }
 
 func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
+	ctx := context.Background()
 	body, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("failed to marshal task: %w", err)
@@ -76,7 +79,10 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
 
-	log.Printf("Published task: TaskID=%s, SourceKey=%s", task.TaskID, task.SourceKey)
+	slog.InfoContext(ctx, "Published task",
+		"task_id", task.TaskID,
+		"source_key", task.SourceKey,
+	)
 	return nil
 }
 

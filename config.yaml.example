@@ -1,0 +1,28 @@
+# Cloud Media 配置文件示例
+# 复制为 config.yaml 并根据实际情况修改
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+log:
+  level: info  # debug, info, warn, error
+
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: password
+  dbname: media-db
+  sslmode: disable
+
+rabbitmq:
+  url: amqp://guest:guest@localhost:5672/
+
+minio:
+  internal_endpoint: localhost:9000
+  internal_use_ssl: false
+  external_endpoint: localhost:9000
+  external_use_ssl: false
+  access_key_id: rootadmin
+  secret_access_key: rootpassword
