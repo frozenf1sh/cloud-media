@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Media - E2E Test Result</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 28px; margin-bottom: 10px; }
+        .header p { opacity: 0.8; }
+        .status-badge {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            margin-top: 15px;
+        }
+        .status-success { background: #10b981; }
+        .status-failed { background: #ef4444; }
+        .status-pending { background: #f59e0b; }
+        .content { padding: 30px; }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .info-card {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+        .info-card label {
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        .info-card value {
+            display: block;
+            font-size: 16px;
+            color: #1e293b;
+            font-weight: 500;
+            word-break: break-all;
+        }
+        .progress-section { margin-bottom: 30px; }
+        .progress-bar {
+            height: 12px;
+            background: #e2e8f0;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 6px;
+            transition: width 0.3s ease;
+        }
+        .progress-text {
+            text-align: right;
+            font-size: 14px;
+            color: #64748b;
+            margin-top: 5px;
+        }
+        .player-section {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .player-section h3 {
+            color: white;
+            margin-bottom: 15px;
+        }
+        .video-container {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video { width: 100%; display: block; background: #000; }
+        .thumbnail {
+            width: 100%;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .url-list { margin-top: 20px; }
+        .url-item {
+            background: #f1f5f9;
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            word-break: break-all;
+        }
+        .url-label {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        .error-section {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .error-section h3 { color: #dc2626; margin-bottom: 10px; }
+        .error-text { color: #7f1d1d; font-family: monospace; }
+        .log-section {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .log-section h3 { color: #94a3b8; margin-bottom: 15px; }
+        .log-content {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #22c55e;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Cloud Media E2E Test Result</h1>
+            <p>端到端测试结果报告</p>
+            {{if eq .Status "success"}}
+                <span class="status-badge status-success">✓ SUCCESS</span>
+            {{else if eq .Status "failed"}}
+                <span class="status-badge status-failed">✗ FAILED</span>
+            {{else}}
+                <span class="status-badge status-pending">⏳ {{.Status}}</span>
+            {{end}}
+        </div>
+
+        <div class="content">
+            <div class="info-grid">
+                <div class="info-card">
+                    <label>Task ID</label>
+                    <value>{{.TaskID}}</value>
+                </div>
+                <div class="info-card">
+                    <label>Video Path</label>
+                    <value>{{.VideoPath}}</value>
+                </div>
+                <div class="info-card">
+                    <label>Duration</label>
+                    <value>{{.Duration}}</value>
+                </div>
+                <div class="info-card">
+                    <label>Started At</label>
+                    <value>{{.StartedAt.Format "2006-01-02 15:04:05"}}</value>
+                </div>
+                {{if .CompletedAt}}
+                <div class="info-card">
+                    <label>Completed At</label>
+                    <value>{{.CompletedAt.Format "2006-01-02 15:04:05"}}</value>
+                </div>
+                {{end}}
+                <div class="info-card">
+                    <label>MinIO Endpoint</label>
+                    <value>{{.MinIOEndpoint}}</value>
+                </div>
+            </div>
+
+            <div class="progress-section">
+                <h3>Progress</h3>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{.Progress}}%"></div>
+                </div>
+                <div class="progress-text">{{.Progress}}%</div>
+            </div>
+
+            {{if .ErrorMessage}}
+            <div class="error-section">
+                <h3>⚠️ Error</h3>
+                <div class="error-text">{{.ErrorMessage}}</div>
+            </div>
+            {{end}}
+
+            {{if .Error}}
+            <div class="error-section">
+                <h3>⚠️ Test Error</h3>
+                <div class="error-text">{{.Error}}</div>
+            </div>
+            {{end}}
+
+            {{if eq .Status "success"}}
+            <div class="player-section">
+                <h3>🎥 Video Player</h3>
+                {{if .ThumbnailURL}}
+                <img src="{{.ThumbnailURL}}" alt="Thumbnail" class="thumbnail" onerror="this.style.display='none'">
+                {{end}}
+                <div class="video-container">
+                    <video id="video" controls></video>
+                </div>
+            </div>
+
+            <div class="url-list">
+                <h3>🔗 Direct URLs</h3>
+                {{if .PlaylistURL}}
+                <div class="url-item">
+                    <div class="url-label">HLS Playlist</div>
+                    {{.PlaylistURL}}
+                </div>
+                {{end}}
+                {{if .ThumbnailURL}}
+                <div class="url-item">
+                    <div class="url-label">Thumbnail</div>
+                    {{.ThumbnailURL}}
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+
+            <div class="log-section">
+                <h3>📋 How to Use</h3>
+                <div class="log-content">
+# 运行测试命令
+go run ./test/e2e -video ./your-video.mp4
+
+# 指定 API 地址
+go run ./test/e2e -video ./video.mp4 -api-addr http://localhost:8080
+
+# 指定输出 HTML 文件
+go run ./test/e2e -video ./video.mp4 -output my_result.html
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{if and (eq .Status "success") .PlaylistURL}}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var video = document.getElementById('video');
+            var playlistUrl = "{{.PlaylistURL}}";
+
+            console.log('Loading HLS from:', playlistUrl);
+
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                var hls = new Hls();
+                hls.loadSource(playlistUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    console.log('HLS manifest loaded, ready to play');
+                });
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                console.log('Network error, trying to recover');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                console.log('Media error, trying to recover');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = playlistUrl;
+                console.log('Using native HLS support');
+            } else {
+                console.error('HLS not supported');
+                alert('Your browser does not support HLS playback');
+            }
+        });
+    </script>
+    {{end}}
+</body>
+</html>
