@@ -10,6 +10,9 @@
 - 💾 **持久化存储** - PostgreSQL 任务状态追踪
 - 📦 **对象存储** - MinIO 双 Endpoint 模式，支持内外网分离
 - 🔌 **整洁架构** - 领域驱动设计，依赖倒置
+- 📐 **智能宽高比** - 横屏/竖屏自适应，保持原始比例
+- ⚠️ **极端比例防护** - 拒绝 1:16 以外或 16:1 以外的极端比例视频
+- 🧪 **E2E 测试** - 端到端测试 + 可视化 HTML 报告
 
 ## 技术栈
 
@@ -31,23 +34,43 @@
 ```
 cloud-media/
 ├── cmd/                          # 应用入口
-│   └── api-server/              # API 服务器
+│   ├── api-server/              # API 服务器
+│   │   ├── main.go
+│   │   ├── wire.go              # Wire 配置
+│   │   ├── wire_gen.go          # Wire 生成 (不要编辑)
+│   │   └── server.go
+│   └── worker/                  # Worker 服务（消费 MQ + 转码）
 │       ├── main.go
-│       ├── wire.go              # Wire 配置
-│       ├── wire_gen.go          # Wire 生成 (不要编辑)
-│       └── server.go
+│       ├── wire.go
+│       └── wire_gen.go
 ├── internal/                     # 私有应用代码
 │   ├── domain/                  # 领域层 (Enterprise Business Rules)
 │   │   └── video.go             # 实体和接口定义
 │   ├── usecase/                 # 用例层 (Application Business Rules)
-│   │   └── video_usecase.go     # 业务逻辑
+│   │   ├── video_usecase.go     # API 业务逻辑
+│   │   └── worker.go            # Worker 业务逻辑
 │   ├── adapter/                 # 适配器层 (Interface Adapters)
 │   │   └── rpc/                 # RPC 适配器
 │   └── infrastructure/          # 基础设施层 (Frameworks & Drivers)
 │       ├── broker/              # RabbitMQ
 │       ├── persistence/         # PostgreSQL + GORM
-│       └── storage/             # MinIO 对象存储
+│       ├── storage/             # MinIO 对象存储
+│       └── transcoder/          # FFmpeg 转码器
+├── pkg/                          # 公共库（可被外部引用）
+│   ├── config/                  # 配置管理
+│   ├── logger/                  # 日志系统
+│   ├── interceptor/             # 拦截器
+│   └── ffmpeg/                  # FFmpeg 基础封装
+│       ├── ffmpeg.go            # FFmpeg 命令封装
+│       ├── ffprobe.go           # FFprobe 命令封装
+│       ├── video_info.go        # 视频信息解析
+│       ├── scale.go             # 缩放计算和宽高比验证
+│       └── progress.go          # 进度解析
 ├── proto/                        # Protobuf 定义
+├── test/                         # 测试
+│   └── e2e/                     # 端到端测试
+│       ├── main.go              # E2E 测试程序
+│       └── template.html        # HTML 报告模板
 ├── doc/                          # 文档
 │   ├── DATABASE_DESIGN.md       # 数据库设计文档
 │   ├── DATABASE_DESIGN_V2.md    # HLS 扩展设计
@@ -129,15 +152,32 @@ docker-compose up -d
 
 # 生成依赖注入
 cd cmd/api-server && wire
+cd ../worker && wire
 ```
 
 ### 3. 运行服务
 
+**启动 API Server:**
 ```bash
 go run ./cmd/api-server
 ```
 
-服务将在 `http://localhost:8080` 启动。
+**启动 Worker:**
+```bash
+go run ./cmd/worker
+```
+
+API 服务将在 `http://localhost:8080` 启动。
+
+### 4. 运行 E2E 测试
+
+```bash
+go run ./test/e2e -video /path/to/video.mp4
+```
+
+测试完成后会生成 `test_result.html` 报告。
+
+详见 [test/README.md](test/README.md)
 
 ## API 接口
 
@@ -185,10 +225,26 @@ curl -X POST http://localhost:8080/api.v1.VideoService/CancelTask \
 - ✅ Infrastructure 层 - 数据库 + MQ + MinIO 完成
 - ✅ API 层 - 完整
 - ✅ MinIO 集成 - 已完成（双 Endpoint 模式）
-- ⏳ Worker 服务 - 待开发
-- ⏳ FFmpeg 转码 - 待开发
+- ✅ Worker 服务 - 已完成
+- ✅ FFmpeg 转码 - 已完成（HLS 切片、多码率、智能宽高比）
+- ✅ pkg/ffmpeg - FFmpeg/FFprobe 基础封装
+- ✅ E2E 测试 - 端到端测试 + HTML 报告
 
 详见 [doc/TODO.md](doc/TODO.md)
+
+### 智能宽高比处理
+
+**横屏视频**（宽 ≥ 高）：
+- 固定目标高度（1080/720/480）
+- 按比例计算宽度
+
+**竖屏视频**（高 > 宽）：
+- 固定目标宽度（1080/720/480）
+- 按比例计算高度
+
+**宽高比限制**：
+- 允许范围：1:16 ~ 16:1
+- 超出范围拒绝处理
 
 ### 重新生成代码
 
@@ -198,6 +254,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/CancelTask \
 
 # Wire 生成依赖注入
 cd cmd/api-server && wire
+cd ../worker && wire
 ```
 
 ### 项目布局参考

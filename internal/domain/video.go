@@ -149,7 +149,7 @@ type Transcoder interface {
 	GetVideoInfo(ctx context.Context, inputPath string) (*VideoInfo, error)
 
 	// GenerateThumbnail 生成视频封面
-	GenerateThumbnail(ctx context.Context, inputPath string, outputPath string, timeOffset float64) error
+	GenerateThumbnail(ctx context.Context, inputPath string, outputPath string, timeOffset float64, videoInfo *VideoInfo) error
 }
 
 // VideoInfo 视频信息

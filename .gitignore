@@ -37,3 +37,6 @@ doc/
 
 # Build output
 bin/
+
+# blob
+*.mp4
