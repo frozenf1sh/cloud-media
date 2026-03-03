@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
@@ -118,9 +119,27 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 		return uc.handleTaskError(ctx, task, "failed to transcode video", err)
 	}
 
+	// 修正输出路径 - 使用 taskID 作为 base path
+	outputInfo.OutputBasePath = task.TaskID
+	if outputInfo.PlaylistPath != "" {
+		outputInfo.PlaylistPath = filepath.Join(task.TaskID, "master.m3u8")
+	}
+	if outputInfo.ThumbnailPath != "" {
+		outputInfo.ThumbnailPath = filepath.Join(task.TaskID, "thumbnail.jpg")
+	}
+	for i := range outputInfo.Variants {
+		oldPath := outputInfo.Variants[i].PlaylistPath
+		// 从旧路径中提取 resolution 部分
+		parts := strings.Split(oldPath, string(filepath.Separator))
+		if len(parts) >= 2 {
+			resolution := parts[len(parts)-2]
+			outputInfo.Variants[i].PlaylistPath = filepath.Join(task.TaskID, resolution, "index.m3u8")
+		}
+	}
+
 	// 4. 上传转码结果到 MinIO
-	log.Info("Uploading output files", "output_bucket", outputInfo.OutputBucket)
-	if err := uc.uploadOutputFiles(ctx, outputDir, outputInfo); err != nil {
+	log.Info("Uploading output files", "output_bucket", outputInfo.OutputBucket, "base_path", task.TaskID)
+	if err := uc.uploadOutputFiles(ctx, outputDir, outputInfo, task.TaskID); err != nil {
 		return uc.handleTaskError(ctx, task, "failed to upload output files", err)
 	}
 
@@ -156,7 +175,7 @@ func (uc *WorkerUseCase) downloadSourceVideo(ctx context.Context, bucket, key, o
 }
 
 // uploadOutputFiles 上传输出文件到存储
-func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string, outputInfo *domain.OutputInfo) error {
+func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string, outputInfo *domain.OutputInfo, basePath string) error {
 	log := slog.With("trace_id", logger.FromContext(ctx))
 
 	// 遍历输出目录上传所有文件
@@ -174,7 +193,7 @@ func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string
 		if err != nil {
 			return err
 		}
-		objectKey := filepath.Join(outputInfo.OutputBasePath, relPath)
+		objectKey := filepath.Join(basePath, relPath)
 
 		log.Debug("Uploading file", "path", path, "key", objectKey)
 
