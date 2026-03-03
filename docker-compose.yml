@@ -65,10 +65,62 @@ services:
       timeout: 5s
       retries: 5
 
+  # Loki: 日志系统
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: media-loki
+    user: root
+    ports:
+      - "3100:3100"
+    volumes:
+      # 映射配置文件
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      # 持久化日志数据
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - media-internal
+
+  # Promtail: 采集 Docker 原始日志并发送给 Loki
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: media-promtail
+    user: root  # 确保有权读取宿主机日志文件
+    volumes:
+      # 映射宿主机的 Docker 日志目录（只读）
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 映射 Promtail 的配置文件
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/config.yaml
+    networks:
+      - media-internal
+    depends_on:
+      - loki
+
+  # Grafana: 界面展示
+  grafana:
+    image: grafana/grafana:latest
+    container_name: media-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      # 持久化配置、插件和仪表盘
+      - grafana_data:/var/lib/grafana 
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: password
+      GF_SECURITY_ADMIN_USER: admin
+    networks:
+      - media-internal
+    depends_on:
+      - loki
+
 volumes:
   minio_data:
   rabbitmq_data:
   postgres_data:
+  loki_data:
+  grafana_data:
 
 networks:
   media-internal:
