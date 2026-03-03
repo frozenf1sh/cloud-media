@@ -21,6 +21,7 @@ const (
 type VideoTask struct {
 	ID              uint
 	TaskID          string
+	TraceID         string          // 全链路追踪 ID
 	SourceKey       string
 	SourceBucket    string
 	SourceSize      int64           // 源文件大小（字节）

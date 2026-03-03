@@ -13,6 +13,7 @@ import (
 type VideoTaskModel struct {
 	ID               uint           `gorm:"primaryKey;autoIncrement"`
 	TaskID           string         `gorm:"size:64;uniqueIndex;not null"`
+	TraceID          string         `gorm:"size:64;index"` // 全链路追踪 ID
 	SourceKey        string         `gorm:"size:512;not null"`
 	SourceBucket     string         `gorm:"size:64;not null"`
 	SourceSize       int64          // 源文件大小（字节）
@@ -41,6 +42,7 @@ func (m *VideoTaskModel) ToDomain() *domain.VideoTask {
 	task := &domain.VideoTask{
 		ID:             m.ID,
 		TaskID:         m.TaskID,
+		TraceID:        m.TraceID,
 		SourceKey:      m.SourceKey,
 		SourceBucket:   m.SourceBucket,
 		SourceSize:     m.SourceSize,
@@ -85,6 +87,7 @@ func FromDomain(task *domain.VideoTask) *VideoTaskModel {
 	model := &VideoTaskModel{
 		ID:             task.ID,
 		TaskID:         task.TaskID,
+		TraceID:        task.TraceID,
 		SourceKey:      task.SourceKey,
 		SourceBucket:   task.SourceBucket,
 		SourceSize:     task.SourceSize,

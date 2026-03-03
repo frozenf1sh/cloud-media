@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
+	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/google/wire"
 )
 
@@ -27,9 +28,13 @@ func NewVideoUseCase(mq domain.MQBroker, repo domain.VideoTaskRepository) *Video
 
 // SubmitTranscodeTask 提交转码任务
 func (uc *VideoUseCase) SubmitTranscodeTask(ctx context.Context, taskID, sourceBucket, sourceKey string) (*domain.VideoTask, error) {
+	// 从上下文中提取 Trace ID
+	traceID := logger.FromContext(ctx)
+
 	// 1. 创建任务领域对象
 	task := &domain.VideoTask{
 		TaskID:       taskID,
+		TraceID:      traceID,
 		SourceKey:    sourceKey,
 		SourceBucket: sourceBucket,
 		Status:       domain.TaskStatusPending,
