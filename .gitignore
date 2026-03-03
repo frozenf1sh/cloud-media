@@ -31,3 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 CLAUDE.md
+
+# Project documentation (not tracked)
+doc/

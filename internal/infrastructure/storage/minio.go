@@ -157,3 +157,43 @@ func (m *MinIOStorage) DeleteObject(ctx context.Context, bucket, key string) err
 	}
 	return nil
 }
+
+// UploadFromReader 从 io.Reader 上传文件（使用内网客户端）
+func (m *MinIOStorage) UploadFromReader(ctx context.Context, bucket, key string, reader io.Reader, size int64) error {
+	// 确保存储桶存在
+	exists, err := m.coreClient.BucketExists(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to check bucket existence: %w", err)
+	}
+	if !exists {
+		if err := m.coreClient.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("failed to create bucket: %w", err)
+		}
+	}
+
+	_, err = m.coreClient.PutObject(ctx, bucket, key, reader, size,
+		minio.PutObjectOptions{
+			ContentType: "application/octet-stream",
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upload from reader: %w", err)
+	}
+
+	return nil
+}
+
+// DownloadToWriter 下载文件到 io.Writer（使用内网客户端）
+func (m *MinIOStorage) DownloadToWriter(ctx context.Context, bucket, key string, writer io.Writer) error {
+	obj, err := m.coreClient.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get object: %w", err)
+	}
+	defer obj.Close()
+
+	if _, err = io.Copy(writer, obj); err != nil {
+		return fmt.Errorf("failed to copy object to writer: %w", err)
+	}
+
+	return nil
+}
