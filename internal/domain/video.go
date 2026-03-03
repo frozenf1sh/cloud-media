@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // VideoTaskStatus 任务状态类型
 type VideoTaskStatus string
@@ -117,4 +120,46 @@ type ObjectStorage interface {
 	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
 	// DeleteObject 删除对象
 	DeleteObject(ctx context.Context, bucket, key string) error
+	// UploadFromReader 从 io.Reader 上传文件
+	UploadFromReader(ctx context.Context, bucket, key string, reader io.Reader, size int64) error
+	// DownloadToWriter 下载文件到 io.Writer
+	DownloadToWriter(ctx context.Context, bucket, key string, writer io.Writer) error
+}
+
+// TranscodeProgressCallback 转码进度回调函数
+type TranscodeProgressCallback func(progress int, message string)
+
+// Transcoder 视频转码器接口
+type Transcoder interface {
+	// Transcode 执行视频转码
+	// inputPath: 输入视频文件路径
+	// outputDir: 输出目录
+	// config: 转码配置
+	// onProgress: 进度回调
+	// 返回: 输出信息，错误
+	Transcode(
+		ctx context.Context,
+		inputPath string,
+		outputDir string,
+		config *TranscodeConfig,
+		onProgress TranscodeProgressCallback,
+	) (*OutputInfo, error)
+
+	// GetVideoInfo 获取视频信息
+	GetVideoInfo(ctx context.Context, inputPath string) (*VideoInfo, error)
+
+	// GenerateThumbnail 生成视频封面
+	GenerateThumbnail(ctx context.Context, inputPath string, outputPath string, timeOffset float64) error
+}
+
+// VideoInfo 视频信息
+type VideoInfo struct {
+	Duration  float64 // 时长（秒）
+	Width     int     // 宽度
+	Height    int     // 高度
+	Codec     string  // 视频编码
+	Bitrate   int64   // 码率（bps）
+	FPS       float64 // 帧率
+	AudioCodec string // 音频编码
+	FileSize  int64   // 文件大小（字节）
 }

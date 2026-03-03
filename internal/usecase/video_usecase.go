@@ -9,7 +9,7 @@ import (
 )
 
 // ProviderSet 是 Wire 的提供者集合
-var ProviderSet = wire.NewSet(NewVideoUseCase)
+var ProviderSet = wire.NewSet(NewVideoUseCase, WorkerProviderSet)
 
 // VideoUseCase 视频处理用例
 type VideoUseCase struct {

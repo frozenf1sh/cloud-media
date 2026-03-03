@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
+	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/google/wire"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -18,10 +19,14 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MQBroker), new(*RabbitMQBroker)),
 )
 
+// TaskHandler 任务处理函数类型
+type TaskHandler func(ctx context.Context, task *domain.VideoTask) error
+
 type RabbitMQBroker struct {
 	conn    *amqp.Connection
 	channel *amqp.Channel
 	queue   amqp.Queue
+	url     string
 }
 
 func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
@@ -34,6 +39,17 @@ func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to open channel: %w", err)
+	}
+
+	// 设置 QoS - 公平分发
+	if err := ch.Qos(
+		1,     // prefetch count
+		0,     // prefetch size
+		false, // global
+	); err != nil {
+		ch.Close()
+		conn.Close()
+		return nil, fmt.Errorf("failed to set QoS: %w", err)
 	}
 
 	q, err := ch.QueueDeclare(
@@ -54,6 +70,7 @@ func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
 		conn:    conn,
 		channel: ch,
 		queue:   q,
+		url:     url,
 	}, nil
 }
 
@@ -83,6 +100,125 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 		"task_id", task.TaskID,
 		"source_key", task.SourceKey,
 	)
+	return nil
+}
+
+// ConsumeTasks 开始消费任务
+func (r *RabbitMQBroker) ConsumeTasks(ctx context.Context, handler TaskHandler) error {
+	log := slog.With("trace_id", logger.FromContext(ctx))
+
+	msgs, err := r.channel.Consume(
+		r.queue.Name,
+		"",    // consumer tag
+		false, // auto-ack
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // args
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register consumer: %w", err)
+	}
+
+	log.Info("Started consuming tasks", "queue", r.queue.Name)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Stopping consumer...")
+			return ctx.Err()
+		case msg, ok := <-msgs:
+			if !ok {
+				log.Error("Message channel closed")
+				return fmt.Errorf("message channel closed")
+			}
+
+			// 处理消息
+			if err := r.handleMessage(ctx, msg, handler); err != nil {
+				log.Error("Failed to handle message", "error", err)
+			}
+		}
+	}
+}
+
+// handleMessage 处理单条消息
+func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, handler TaskHandler) error {
+	var task domain.VideoTask
+	if err := json.Unmarshal(msg.Body, &task); err != nil {
+		slog.Error("Failed to unmarshal task", "error", err)
+		// 拒绝消息，不重新入队（无效消息）
+		_ = msg.Nack(false, false)
+		return fmt.Errorf("failed to unmarshal task: %w", err)
+	}
+
+	log := slog.With(
+		"trace_id", logger.FromContext(ctx),
+		"task_id", task.TaskID,
+	)
+	log.Info("Received task")
+
+	// 创建带 trace_id 的 context
+	taskCtx := logger.WithTraceID(ctx, task.TaskID)
+
+	// 调用 handler 处理任务
+	if err := handler(taskCtx, &task); err != nil {
+		log.Error("Task handling failed", "error", err)
+		// 处理失败，不重新入队（已更新数据库状态）
+		_ = msg.Nack(false, false)
+		return err
+	}
+
+	// 确认消息
+	if err := msg.Ack(false); err != nil {
+		log.Warn("Failed to ack message", "error", err)
+	}
+
+	log.Info("Task completed and acknowledged")
+	return nil
+}
+
+// Reconnect 重新连接
+func (r *RabbitMQBroker) Reconnect() error {
+	if r.conn != nil {
+		_ = r.conn.Close()
+	}
+
+	conn, err := amqp.Dial(r.url)
+	if err != nil {
+		return fmt.Errorf("failed to reconnect: %w", err)
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to open channel on reconnect: %w", err)
+	}
+
+	// 重新设置 QoS
+	if err := ch.Qos(1, 0, false); err != nil {
+		ch.Close()
+		conn.Close()
+		return fmt.Errorf("failed to set QoS on reconnect: %w", err)
+	}
+
+	q, err := ch.QueueDeclare(
+		"video_transcode_tasks",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		ch.Close()
+		conn.Close()
+		return fmt.Errorf("failed to declare queue on reconnect: %w", err)
+	}
+
+	r.conn = conn
+	r.channel = ch
+	r.queue = q
+
 	return nil
 }
 
