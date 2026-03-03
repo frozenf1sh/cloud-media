@@ -34,3 +34,6 @@ CLAUDE.md
 
 # Project documentation (not tracked)
 doc/
+
+# Build output
+bin/
