@@ -76,6 +76,12 @@ func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
 
 func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 	ctx := context.Background()
+
+	// 如果任务有 TraceID，添加到 context 用于日志
+	if task.TraceID != "" {
+		ctx = logger.WithTraceID(ctx, task.TraceID)
+	}
+
 	body, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("failed to marshal task: %w", err)
@@ -98,6 +104,7 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 
 	slog.InfoContext(ctx, "Published task",
 		"task_id", task.TaskID,
+		"trace_id", task.TraceID,
 		"source_key", task.SourceKey,
 	)
 	return nil
@@ -151,14 +158,20 @@ func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, h
 		return fmt.Errorf("failed to unmarshal task: %w", err)
 	}
 
+	// 使用任务中的 TraceID，如果没有则用 TaskID 作为 fallback
+	traceID := task.TraceID
+	if traceID == "" {
+		traceID = task.TaskID
+	}
+
 	log := slog.With(
-		"trace_id", logger.FromContext(ctx),
+		"trace_id", traceID,
 		"task_id", task.TaskID,
 	)
 	log.Info("Received task")
 
-	// 创建带 trace_id 的 context
-	taskCtx := logger.WithTraceID(ctx, task.TaskID)
+	// 创建带 trace_id 的 context - 优先使用任务保存的 TraceID
+	taskCtx := logger.WithTraceID(ctx, traceID)
 
 	// 调用 handler 处理任务
 	if err := handler(taskCtx, &task); err != nil {
