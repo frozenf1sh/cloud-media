@@ -106,7 +106,7 @@ services:
       - "3000:3000"
     volumes:
       # 持久化配置、插件和仪表盘
-      - grafana_data:/var/lib/grafana 
+      - grafana_data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_PASSWORD: password
       GF_SECURITY_ADMIN_USER: admin
@@ -114,6 +114,45 @@ services:
       - media-internal
     depends_on:
       - loki
+
+  # API Server
+  api-server:
+    image: cloud-media-api-server:latest
+    container_name: media-api-server
+    networks:
+      - media-internal
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml
+    environment:
+      - CLOUD_MEDIA_SERVER_HOST=0.0.0.0
+      - CLOUD_MEDIA_SERVER_PORT=8080
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # Worker
+  worker:
+    image: cloud-media-worker:latest
+    container_name: media-worker
+    networks:
+      - media-internal
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
 volumes:
   minio_data:

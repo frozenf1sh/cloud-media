@@ -133,18 +133,33 @@ Config{
 - Wire CLI (`go install github.com/google/wire/cmd/wire@latest`)
 - Buf CLI
 
-### 1. 启动基础设施
+### 方式一：Docker Compose 一键启动（推荐）
 
 ```bash
-docker-compose up -d
+# 1. 构建镜像
+docker build --target api-server -t cloud-media-api-server .
+docker build --target worker -t cloud-media-worker .
+
+# 2. 启动全部服务
+docker compose up -d
 ```
 
-服务:
+全部服务:
+- API Server: http://localhost:8080
 - MinIO: http://localhost:9001 (rootadmin / rootpassword)
 - RabbitMQ: http://localhost:15672 (guest / guest)
 - PostgreSQL: localhost:5432 (postgres / password)
+- Grafana: http://localhost:3000 (admin / password)
 
-### 2. 生成代码
+### 方式二：本地开发
+
+#### 1. 启动基础设施
+
+```bash
+docker compose up -d minio rabbitmq postgres
+```
+
+#### 2. 生成代码
 
 ```bash
 # 生成 protobuf 代码
@@ -155,7 +170,7 @@ cd cmd/api-server && wire
 cd ../worker && wire
 ```
 
-### 3. 运行服务
+#### 3. 运行服务
 
 **启动 API Server:**
 ```bash
@@ -169,7 +184,7 @@ go run ./cmd/worker
 
 API 服务将在 `http://localhost:8080` 启动。
 
-### 4. 运行 E2E 测试
+#### 4. 运行 E2E 测试
 
 ```bash
 go run ./test/e2e -video /path/to/video.mp4
@@ -178,6 +193,39 @@ go run ./test/e2e -video /path/to/video.mp4
 测试完成后会生成 `test_result.html` 报告。
 
 详见 [test/README.md](test/README.md)
+
+### Docker 构建
+
+项目根目录包含多阶段构建的 `Dockerfile`，支持两个服务：
+
+**构建 API Server 镜像：**
+```bash
+docker build --target api-server -t cloud-media-api-server .
+```
+
+**构建 Worker 镜像：**
+```bash
+docker build --target worker -t cloud-media-worker .
+```
+
+**镜像特性：**
+- 基于 Alpine Linux，体积小
+- 包含 FFmpeg
+- 多阶段构建，最终镜像仅包含二进制文件
+
+**运行示例：**
+```bash
+# API Server
+docker run -d --name cloud-media-api \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  cloud-media-api-server
+
+# Worker
+docker run -d --name cloud-media-worker \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  cloud-media-worker
+```
 
 ## API 接口
 

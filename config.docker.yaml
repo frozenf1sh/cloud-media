@@ -1,0 +1,28 @@
+# Cloud Media Docker 配置文件
+# 用于 docker-compose 环境
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+log:
+  level: info  # debug, info, warn, error
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: password
+  dbname: media-db
+  sslmode: disable
+
+rabbitmq:
+  url: amqp://guest:guest@rabbitmq:5672/
+
+minio:
+  internal_endpoint: minio:9000
+  internal_use_ssl: false
+  external_endpoint: localhost:9000
+  external_use_ssl: false
+  access_key_id: rootadmin
+  secret_access_key: rootpassword

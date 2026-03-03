@@ -40,3 +40,6 @@ bin/
 
 # blob
 *.mp4
+
+# E2E test output
+test_result.html
