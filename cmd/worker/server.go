@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/usecase"
+	"github.com/frozenf1sh/cloud-media/pkg/health"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 )
 
@@ -17,6 +17,7 @@ type Worker struct {
 	broker   *broker.RabbitMQBroker
 	useCase  *usecase.WorkerUseCase
 	database *persistence.Database
+	health   *health.Health
 }
 
 // NewWorker 创建 Worker
@@ -25,24 +26,35 @@ func NewWorker(
 	uc *usecase.WorkerUseCase,
 	db *persistence.Database,
 ) *Worker {
+	// 创建健康检查管理器
+	healthChecker := health.New("worker", "1.0.0")
+
+	// 添加数据库健康检查
+	healthChecker.RegisterFunc("database", health.SimpleCheck(func(ctx context.Context) error {
+		sqlDB, err := db.DB.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.PingContext(ctx)
+	}))
+
 	return &Worker{
 		broker:   b,
 		useCase:  uc,
 		database: db,
+		health:   healthChecker,
 	}
 }
 
 // Run 运行 worker
 func (w *Worker) Run(ctx context.Context) error {
-	log := slog.With("trace_id", logger.FromContext(ctx))
-
 	// 执行数据库迁移
-	log.Info("Running database migration...")
+	logger.Info("Running database migration...")
 	if err := w.database.AutoMigrate(); err != nil {
-		log.Error("Failed to run migration", "error", err)
+		logger.Error("Failed to run migration", logger.Err(err))
 		return err
 	}
-	log.Info("Migration completed successfully")
+	logger.Info("Migration completed successfully")
 
 	// 定义任务处理器
 	handler := func(ctx context.Context, task *domain.VideoTask) error {
@@ -53,7 +65,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Context cancelled, stopping worker")
+			logger.Info("Context cancelled, stopping worker")
 			w.broker.Close()
 			return ctx.Err()
 		default:
@@ -62,7 +74,7 @@ func (w *Worker) Run(ctx context.Context) error {
 				if err == context.Canceled {
 					return err
 				}
-				log.Error("Consume failed, attempting reconnect...", "error", err)
+				logger.Error("Consume failed, attempting reconnect...", logger.Err(err))
 
 				// 等待后重连
 				select {
@@ -72,11 +84,16 @@ func (w *Worker) Run(ctx context.Context) error {
 				}
 
 				if err := w.broker.Reconnect(); err != nil {
-					log.Error("Reconnect failed", "error", err)
+					logger.Error("Reconnect failed", logger.Err(err))
 					continue
 				}
-				log.Info("Reconnected successfully")
+				logger.Info("Reconnected successfully")
 			}
 		}
 	}
+}
+
+// HealthChecker 返回健康检查器
+func (w *Worker) HealthChecker() *health.Health {
+	return w.health
 }

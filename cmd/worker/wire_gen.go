@@ -47,8 +47,7 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 
 // wire.go:
 
-var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, NewWorker,
-	provideRabbitMQURL,
+var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, provideRabbitMQURL,
 	provideDatabaseConfig,
 	provideMinIOConfig,
 )

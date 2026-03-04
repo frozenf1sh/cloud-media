@@ -7,6 +7,7 @@ server:
 
 log:
   level: info  # debug, info, warn, error
+  format: json
 
 database:
   host: postgres
@@ -26,3 +27,19 @@ minio:
   external_use_ssl: false
   access_key_id: rootadmin
   secret_access_key: rootpassword
+
+observability:
+  service_name: cloud-media
+  service_version: 1.0.0
+
+  metrics:
+    enabled: true
+    path: /metrics
+    port: 9090
+
+  tracing:
+    enabled: true
+    exporter: otlp           # otlp, stdout, none
+    otlp_endpoint: localhost:4317
+    sampler: always_on      # always_on, always_off, traceidratio
+    sampler_ratio: 1.0
