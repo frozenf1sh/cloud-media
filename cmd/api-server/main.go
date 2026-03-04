@@ -25,6 +25,9 @@ func main() {
 		cfg = config.Default()
 	}
 
+	// 迁移旧版配置（向后兼容）
+	cfg.MigrateLegacyConfig()
+
 	// 2. 初始化日志
 	logger.Init(logger.Config{
 		Level:          cfg.Log.Level,
