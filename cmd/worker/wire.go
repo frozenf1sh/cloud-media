@@ -22,7 +22,7 @@ var workerProviderSet = wire.NewSet(
 	usecase.ProviderSet,
 	provideRabbitMQURL,
 	provideDatabaseConfig,
-	provideMinIOConfig,
+	provideObjectStorageConfig,
 )
 
 func InitializeWorker(cfg *config.Config) (*Worker, error) {
@@ -45,13 +45,6 @@ func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
 	}
 }
 
-func provideMinIOConfig(cfg *config.Config) *storage.Config {
-	return &storage.Config{
-		InternalEndpoint: cfg.MinIO.InternalEndpoint,
-		InternalUseSSL:  cfg.MinIO.InternalUseSSL,
-		ExternalEndpoint: cfg.MinIO.ExternalEndpoint,
-		ExternalUseSSL:  cfg.MinIO.ExternalUseSSL,
-		AccessKeyID:     cfg.MinIO.AccessKeyID,
-		SecretAccessKey: cfg.MinIO.SecretAccessKey,
-	}
+func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig {
+	return &cfg.ObjectStorage
 }
