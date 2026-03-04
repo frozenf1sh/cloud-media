@@ -20,14 +20,13 @@ var workerProviderSet = wire.NewSet(
 	storage.ProviderSet,
 	transcoder.ProviderSet,
 	usecase.ProviderSet,
-	NewWorker,
 	provideRabbitMQURL,
 	provideDatabaseConfig,
 	provideMinIOConfig,
 )
 
 func InitializeWorker(cfg *config.Config) (*Worker, error) {
-	wire.Build(workerProviderSet)
+	wire.Build(workerProviderSet, NewWorker)
 	return nil, nil
 }
 

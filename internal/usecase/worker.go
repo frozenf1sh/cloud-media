@@ -11,6 +11,8 @@ import (
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
+	"github.com/frozenf1sh/cloud-media/pkg/metrics"
+	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/wire"
 )
 
@@ -41,39 +43,56 @@ func NewWorkerUseCase(
 
 // ProcessTask 处理单个视频转码任务
 func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask) error {
+	ctx, span := telemetry.StartSpan(ctx, "WorkerUseCase.ProcessTask",
+		telemetry.String("task_id", task.TaskID),
+	)
+	defer span.End()
+
+	metrics.RecordTaskStarted()
+
+	startTime := time.Now()
 	log := slog.With(
-		"trace_id", logger.FromContext(ctx),
-		"task_id", task.TaskID,
+		logger.String("trace_id", telemetry.TraceIDFromContext(ctx)),
+		logger.String("task_id", task.TaskID),
 	)
 
-	log.Info("Starting to process task")
+	log.InfoContext(ctx, "Starting to process task")
 
 	// 更新任务状态为 processing
 	now := time.Now().Unix()
 	task.Status = domain.TaskStatusProcessing
 	task.StartedAt = &now
 	if err := uc.repository.Update(ctx, task); err != nil {
-		log.Error("Failed to update task status", "error", err)
+		log.ErrorContext(ctx, "Failed to update task status", logger.Err(err))
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
 	// 创建临时工作目录
 	workDir := filepath.Join(uc.tempDir, "cloud-media", task.TaskID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return uc.handleTaskError(ctx, task, "failed to create work dir", err)
 	}
 	defer func() {
 		// 清理临时文件
 		if err := os.RemoveAll(workDir); err != nil {
-			log.Warn("Failed to cleanup work dir", "error", err)
+			log.WarnContext(ctx, "Failed to cleanup work dir", logger.Err(err))
 		}
 	}()
 
 	// 1. 从 MinIO 下载源视频
 	inputPath := filepath.Join(workDir, "input"+filepath.Ext(task.SourceKey))
-	log.Info("Downloading source video", "source_bucket", task.SourceBucket, "source_key", task.SourceKey)
+	log.InfoContext(ctx, "Downloading source video",
+		logger.String("source_bucket", task.SourceBucket),
+		logger.String("source_key", task.SourceKey),
+	)
 
 	if err := uc.downloadSourceVideo(ctx, task.SourceBucket, task.SourceKey, inputPath); err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return uc.handleTaskError(ctx, task, "failed to download source video", err)
 	}
 
@@ -83,18 +102,21 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 		task.SourceDuration = videoInfo.Duration
 		task.SourceSize = videoInfo.FileSize
 		if err := uc.repository.Update(ctx, task); err != nil {
-			log.Warn("Failed to update video info", "error", err)
+			log.WarnContext(ctx, "Failed to update video info", logger.Err(err))
 		}
 	}
 
 	// 3. 执行转码
 	outputDir := filepath.Join(workDir, "output")
-	log.Info("Starting transcoding", "output_dir", outputDir)
+	log.InfoContext(ctx, "Starting transcoding", logger.String("output_dir", outputDir))
 
 	progressCallback := func(progress int, message string) {
-		log.Debug("Transcoding progress", "progress", progress, "message", message)
+		log.DebugContext(ctx, "Transcoding progress",
+			logger.Int("progress", progress),
+			logger.String("message", message),
+		)
 		if err := uc.repository.UpdateProgress(ctx, task.TaskID, progress); err != nil {
-			log.Warn("Failed to update progress", "error", err)
+			log.WarnContext(ctx, "Failed to update progress", logger.Err(err))
 		}
 	}
 
@@ -116,6 +138,8 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 
 	outputInfo, err := uc.transcoder.Transcode(ctx, inputPath, outputDir, transcodeConfig, progressCallback)
 	if err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return uc.handleTaskError(ctx, task, "failed to transcode video", err)
 	}
 
@@ -138,8 +162,13 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 	}
 
 	// 4. 上传转码结果到 MinIO
-	log.Info("Uploading output files", "output_bucket", outputInfo.OutputBucket, "base_path", task.TaskID)
+	log.InfoContext(ctx, "Uploading output files",
+		logger.String("output_bucket", outputInfo.OutputBucket),
+		logger.String("base_path", task.TaskID),
+	)
 	if err := uc.uploadOutputFiles(ctx, outputDir, outputInfo, task.TaskID); err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return uc.handleTaskError(ctx, task, "failed to upload output files", err)
 	}
 
@@ -151,11 +180,14 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 	task.CompletedAt = &completedAt
 
 	if err := uc.repository.Update(ctx, task); err != nil {
-		log.Error("Failed to update task to success", "error", err)
+		log.ErrorContext(ctx, "Failed to update task to success", logger.Err(err))
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
 		return fmt.Errorf("failed to update task: %w", err)
 	}
 
-	log.Info("Task completed successfully")
+	log.InfoContext(ctx, "Task completed successfully")
+	metrics.RecordTaskCompleted("success", time.Since(startTime))
 	return nil
 }
 
@@ -176,7 +208,7 @@ func (uc *WorkerUseCase) downloadSourceVideo(ctx context.Context, bucket, key, o
 
 // uploadOutputFiles 上传输出文件到存储
 func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string, outputInfo *domain.OutputInfo, basePath string) error {
-	log := slog.With("trace_id", logger.FromContext(ctx))
+	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
 	// 遍历输出目录上传所有文件
 	return filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
@@ -195,7 +227,10 @@ func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string
 		}
 		objectKey := filepath.Join(basePath, relPath)
 
-		log.Debug("Uploading file", "path", path, "key", objectKey)
+		log.DebugContext(ctx, "Uploading file",
+			logger.String("path", path),
+			logger.String("key", objectKey),
+		)
 
 		file, err := os.Open(path)
 		if err != nil {
@@ -207,22 +242,24 @@ func (uc *WorkerUseCase) uploadOutputFiles(ctx context.Context, outputDir string
 			return fmt.Errorf("failed to upload %s: %w", path, err)
 		}
 
+		metrics.RecordTranscodedBytes(info.Size())
+
 		return nil
 	})
 }
 
 // handleTaskError 处理任务错误
 func (uc *WorkerUseCase) handleTaskError(ctx context.Context, task *domain.VideoTask, message string, err error) error {
-	log := slog.With("trace_id", logger.FromContext(ctx))
+	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
 	fullErr := fmt.Errorf("%s: %w", message, err)
-	log.Error("Task failed", "error", fullErr)
+	log.ErrorContext(ctx, "Task failed", logger.Err(fullErr))
 
 	task.Status = domain.TaskStatusFailed
 	task.ErrorMessage = fullErr.Error()
 
 	if updateErr := uc.repository.Update(ctx, task); updateErr != nil {
-		log.Error("Failed to update task to failed status", "error", updateErr)
+		log.ErrorContext(ctx, "Failed to update task to failed status", logger.Err(updateErr))
 	}
 
 	return fullErr

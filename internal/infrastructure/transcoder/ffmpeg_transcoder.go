@@ -11,6 +11,8 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/ffmpeg"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
+	"github.com/frozenf1sh/cloud-media/pkg/metrics"
+	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/wire"
 )
 
@@ -68,22 +70,28 @@ func (t *FFmpegTranscoder) Transcode(
 	config *domain.TranscodeConfig,
 	onProgress domain.TranscodeProgressCallback,
 ) (*domain.OutputInfo, error) {
-	log := slog.With("trace_id", logger.FromContext(ctx))
+	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.Transcode")
+	defer span.End()
+
+	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
 	// 创建输出目录
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		telemetry.RecordError(ctx, err)
 		return nil, fmt.Errorf("failed to create output dir: %w", err)
 	}
 
 	// 获取视频信息
 	videoInfo, err := t.GetVideoInfo(ctx, inputPath)
 	if err != nil {
-		log.Warn("Failed to get video info, using defaults", "error", err)
+		log.WarnContext(ctx, "Failed to get video info, using defaults", logger.Err(err))
+		telemetry.RecordError(ctx, err)
 		videoInfo = &domain.VideoInfo{Duration: 0}
 	}
 
 	// 验证宽高比
 	if err := t.aspectValidator.Validate(videoInfo.Width, videoInfo.Height); err != nil {
+		telemetry.RecordError(ctx, err)
 		return nil, err
 	}
 
@@ -109,9 +117,10 @@ func (t *FFmpegTranscoder) Transcode(
 	thumbnailPath := filepath.Join(outputDir, "thumbnail.jpg")
 	if err := t.GenerateThumbnail(ctx, inputPath, thumbnailPath, 1.0, videoInfo); err == nil {
 		outputInfo.ThumbnailPath = filepath.Join(outputBasePath, "thumbnail.jpg")
-		log.Info("Generated thumbnail", "path", thumbnailPath)
+		log.InfoContext(ctx, "Generated thumbnail", logger.String("path", thumbnailPath))
 	} else {
-		log.Warn("Failed to generate thumbnail", "error", err)
+		log.WarnContext(ctx, "Failed to generate thumbnail", logger.Err(err))
+		telemetry.RecordError(ctx, err)
 	}
 
 	// 转码每个变体
@@ -122,6 +131,7 @@ func (t *FFmpegTranscoder) Transcode(
 
 		variantDir := filepath.Join(outputDir, variant.name)
 		if err := os.MkdirAll(variantDir, 0755); err != nil {
+			telemetry.RecordError(ctx, err)
 			return nil, fmt.Errorf("failed to create variant dir: %w", err)
 		}
 
@@ -139,8 +149,11 @@ func (t *FFmpegTranscoder) Transcode(
 
 		// 执行转码
 		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.bitrate, videoInfo, variantCallback); err != nil {
+			telemetry.RecordError(ctx, err)
 			return nil, fmt.Errorf("failed to transcode %s: %w", variant.name, err)
 		}
+
+		metrics.RecordTranscodedVideo(variant.name)
 
 		// 记录变体信息
 		variantResolution := resolutionStr
@@ -159,6 +172,7 @@ func (t *FFmpegTranscoder) Transcode(
 	// 生成主播放列表
 	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
 	if err := t.generateMasterPlaylist(masterPlaylistPath, outputInfo.Variants, variantConfigs, videoInfo); err != nil {
+		telemetry.RecordError(ctx, err)
 		return nil, fmt.Errorf("failed to generate master playlist: %w", err)
 	}
 	outputInfo.PlaylistPath = filepath.Join(outputBasePath, "master.m3u8")
@@ -183,7 +197,13 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	videoInfo *domain.VideoInfo,
 	onProgress domain.TranscodeProgressCallback,
 ) error {
-	log := slog.With("trace_id", logger.FromContext(ctx))
+	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.transcodeVariant",
+		telemetry.String("resolution", fmt.Sprintf("%dx%d", width, height)),
+		telemetry.String("bitrate", bitrate),
+	)
+	defer span.End()
+
+	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
 	scaleFilter := t.scaleCalculator.ScaleFilter(width, height)
 
@@ -209,10 +229,12 @@ func (t *FFmpegTranscoder) transcodeVariant(
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		telemetry.RecordError(ctx, err)
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		telemetry.RecordError(ctx, err)
 		return fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
 
@@ -220,10 +242,14 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	go t.progressParser.Parse(stderr, videoInfo.Duration, ffmpeg.ProgressCallback(onProgress))
 
 	if err := cmd.Wait(); err != nil {
+		telemetry.RecordError(ctx, err)
 		return fmt.Errorf("ffmpeg failed: %w", err)
 	}
 
-	log.Info("Variant transcoded", "resolution", fmt.Sprintf("%dx%d", width, height), "bitrate", bitrate)
+	log.InfoContext(ctx, "Variant transcoded",
+		logger.String("resolution", fmt.Sprintf("%dx%d", width, height)),
+		logger.String("bitrate", bitrate),
+	)
 	return nil
 }
 
@@ -247,8 +273,12 @@ func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain
 
 // GetVideoInfo 获取视频信息
 func (t *FFmpegTranscoder) GetVideoInfo(ctx context.Context, inputPath string) (*domain.VideoInfo, error) {
+	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.GetVideoInfo")
+	defer span.End()
+
 	info, err := t.videoInfoParser.Parse(ctx, inputPath)
 	if err != nil {
+		telemetry.RecordError(ctx, err)
 		return nil, err
 	}
 
@@ -267,6 +297,9 @@ func (t *FFmpegTranscoder) GetVideoInfo(ctx context.Context, inputPath string) (
 
 // GenerateThumbnail 生成视频封面，保持宽高比缩放
 func (t *FFmpegTranscoder) GenerateThumbnail(ctx context.Context, inputPath string, outputPath string, timeOffset float64, videoInfo *domain.VideoInfo) error {
+	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.GenerateThumbnail")
+	defer span.End()
+
 	var args []string
 
 	if videoInfo != nil && videoInfo.Width > 0 && videoInfo.Height > 0 {

@@ -2,94 +2,68 @@ package logger
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"time"
 
-	gormlogger "gorm.io/gorm/logger"
+	"gorm.io/gorm/logger"
 )
 
-// GormLogger 是 GORM 的日志接口实现，用于将 GORM 的日志输出到我们的 slog 系统
+// GormLogger 是 GORM 的日志适配器
 type GormLogger struct {
-	level gormlogger.LogLevel
+	SlowThreshold         time.Duration
+	SkipErrRecordNotFound bool
 }
 
-// NewGormLogger 创建一个新的 GORM 日志实例
-func NewGormLogger(level gormlogger.LogLevel) *GormLogger {
+// NewGormLogger 创建 GORM 日志适配器
+func NewGormLogger() *GormLogger {
 	return &GormLogger{
-		level: level,
+		SlowThreshold:         200 * time.Millisecond,
+		SkipErrRecordNotFound: true,
 	}
 }
 
-// LogMode 实现 gormlogger.Interface 接口
-func (l *GormLogger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
-	newLogger := *l
-	newLogger.level = level
-	return &newLogger
+// LogMode 实现 logger.Interface
+func (l *GormLogger) LogMode(level logger.LogLevel) logger.Interface {
+	return l
 }
 
-// Info 实现 gormlogger.Interface 接口
+// Info 实现 logger.Interface
 func (l *GormLogger) Info(ctx context.Context, msg string, data ...interface{}) {
-	if l.level >= gormlogger.Info {
-		slog.InfoContext(ctx, msg, data...)
-	}
+	InfoContext(ctx, fmt.Sprintf(msg, data...))
 }
 
-// Warn 实现 gormlogger.Interface 接口
+// Warn 实现 logger.Interface
 func (l *GormLogger) Warn(ctx context.Context, msg string, data ...interface{}) {
-	if l.level >= gormlogger.Warn {
-		slog.WarnContext(ctx, msg, data...)
-	}
+	WarnContext(ctx, fmt.Sprintf(msg, data...))
 }
 
-// Error 实现 gormlogger.Interface 接口
+// Error 实现 logger.Interface
 func (l *GormLogger) Error(ctx context.Context, msg string, data ...interface{}) {
-	if l.level >= gormlogger.Error {
-		slog.ErrorContext(ctx, msg, data...)
-	}
+	ErrorContext(ctx, fmt.Sprintf(msg, data...))
 }
 
-// Trace 实现 gormlogger.Interface 接口，用于记录 SQL 查询的执行时间
+// Trace 实现 logger.Interface
 func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
-	if l.level <= gormlogger.Silent {
-		return
-	}
-
 	elapsed := time.Since(begin)
 	sql, rows := fc()
 
-	switch {
-	case err != nil && l.level >= gormlogger.Error:
-		slog.ErrorContext(ctx, "SQL query failed",
-			slog.String("sql", sql),
-			slog.Int64("rows", rows),
-			slog.Duration("elapsed", elapsed),
-			slog.Any("error", err),
-		)
-	case elapsed > 100*time.Millisecond && l.level >= gormlogger.Warn:
-		// 慢查询警告
-		slog.WarnContext(ctx, "Slow SQL query",
-			slog.String("sql", sql),
-			slog.Int64("rows", rows),
-			slog.Duration("elapsed", elapsed),
-		)
-	case l.level >= gormlogger.Info:
-		slog.InfoContext(ctx, "SQL query executed",
-			slog.String("sql", sql),
-			slog.Int64("rows", rows),
-			slog.Duration("elapsed", elapsed),
-		)
+	attrs := []any{
+		String("duration", fmt.Sprintf("%.3fms", float64(elapsed.Nanoseconds())/1e6)),
+		String("sql", sql),
+		Int64("rows", rows),
 	}
-}
 
-// 提供便捷的函数，直接创建常见级别的 GORM 日志实例
-func NewGormInfoLogger() *GormLogger {
-	return NewGormLogger(gormlogger.Info)
-}
-
-func NewGormWarnLogger() *GormLogger {
-	return NewGormLogger(gormlogger.Warn)
-}
-
-func NewGormErrorLogger() *GormLogger {
-	return NewGormLogger(gormlogger.Error)
+	if err != nil {
+		if !(l.SkipErrRecordNotFound && err.Error() == "record not found") {
+			attrs = append(attrs, Err(err))
+			ErrorContext(ctx, "Database query failed", attrs...)
+		} else {
+			DebugContext(ctx, "Database query", attrs...)
+		}
+	} else if elapsed > l.SlowThreshold {
+		attrs = append(attrs, String("slow", "true"))
+		WarnContext(ctx, "Slow database query", attrs...)
+	} else {
+		DebugContext(ctx, "Database query", attrs...)
+	}
 }
