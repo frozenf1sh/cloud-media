@@ -77,7 +77,7 @@ func main() {
 	}
 
 	// 初始化日志
-	logger.Init("debug")
+	logger.InitSimple("debug")
 	ctx := context.Background()
 	traceID := uuid.New().String()
 	ctx = logger.WithTraceID(ctx, traceID)
@@ -94,6 +94,8 @@ func main() {
 		log.Warn("Failed to load config, using defaults", "error", err)
 		cfg = config.Default()
 	}
+	// 迁移旧版配置（向后兼容）
+	cfg.MigrateLegacyConfig()
 
 	// 初始化测试配置
 	testCfg := &TestConfig{
@@ -138,16 +140,16 @@ type TestResult struct {
 	StartedAt     time.Time     `json:"started_at"`
 	CompletedAt   time.Time     `json:"completed_at,omitempty"`
 	Error         string        `json:"error,omitempty"`
-	MinIOEndpoint string        `json:"minio_endpoint"`
+	StorageEndpoint string      `json:"storage_endpoint"`
 }
 
 // runE2ETest 运行端到端测试
 func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg *config.Config) (*TestResult, error) {
 	startTime := time.Now()
 	result := &TestResult{
-		VideoPath:     testCfg.videoPath,
-		StartedAt:     startTime,
-		MinIOEndpoint: cfg.MinIO.ExternalEndpoint,
+		VideoPath:       testCfg.videoPath,
+		StartedAt:       startTime,
+		StorageEndpoint: cfg.ObjectStorage.ExternalEndpoint,
 	}
 
 	// 1. 验证视频文件存在
@@ -166,7 +168,7 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 		return result, fmt.Errorf("failed to init MinIO: %w", err)
 	}
 	testCfg.minioClient = minioClient
-	log.Info("MinIO client initialized", "endpoint", cfg.MinIO.InternalEndpoint)
+	log.Info("MinIO client initialized", "endpoint", cfg.ObjectStorage.InternalEndpoint)
 
 	// 3. 生成或使用任务 ID
 	if testCfg.taskID == "" {
@@ -220,9 +222,9 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 	if finalStatus == "success" {
 		log.Info("Step 7: Generating playback URLs")
 		result.PlaylistURL = fmt.Sprintf("http://%s/media-output/%s/master.m3u8",
-			cfg.MinIO.ExternalEndpoint, testCfg.taskID)
+			cfg.ObjectStorage.ExternalEndpoint, testCfg.taskID)
 		result.ThumbnailURL = fmt.Sprintf("http://%s/media-output/%s/thumbnail.jpg",
-			cfg.MinIO.ExternalEndpoint, testCfg.taskID)
+			cfg.ObjectStorage.ExternalEndpoint, testCfg.taskID)
 		log.Info("Playback URLs generated",
 			"playlist", result.PlaylistURL,
 			"thumbnail", result.ThumbnailURL)
@@ -235,16 +237,21 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 	return result, nil
 }
 
-// initMinIOClient 初始化 MinIO 客户端
+// initMinIOClient 初始化 MinIO/S3 兼容客户端
 func initMinIOClient(cfg *config.Config) (*minio.Client, error) {
-	return minio.New(cfg.MinIO.InternalEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.MinIO.AccessKeyID, cfg.MinIO.SecretAccessKey, ""),
-		Secure: cfg.MinIO.InternalUseSSL,
+	region := cfg.ObjectStorage.Region
+	if region == "" {
+		region = "us-east-1"
+	}
+	return minio.New(cfg.ObjectStorage.InternalEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.ObjectStorage.AccessKeyID, cfg.ObjectStorage.SecretAccessKey, ""),
+		Secure: cfg.ObjectStorage.InternalUseSSL,
+		Region: region,
 	})
 }
 
-// uploadToMinIO 上传文件到 MinIO
-func uploadToMinIO(ctx context.Context, log *slog.Logger, client *minio.Client, bucket, key, filePath string, cfg *config.Config) error {
+// uploadToMinIO 上传文件到 MinIO/S3
+func uploadToMinIO(ctx context.Context, log *slog.Logger, client *minio.Client, bucket, key, filePath string, _ *config.Config) error {
 	// 确保 bucket 存在
 	exists, err := client.BucketExists(ctx, bucket)
 	if err != nil {
