@@ -70,6 +70,9 @@ func NewTracerProvider(ctx context.Context, cfg Config) (*TracerProvider, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sampler: %w", err)
 	}
+	slog.Info("Tracing sampler configured",
+		"sampler_type", cfg.Sampler,
+		"sampler_ratio", cfg.SamplerRatio)
 
 	// 创建导出器
 	exporter, err := createExporter(ctx, cfg)
@@ -212,11 +215,12 @@ func Int64(key string, value int64) attribute.KeyValue {
 func createSampler(cfg Config) (sdktrace.Sampler, error) {
 	switch cfg.Sampler {
 	case "always_on":
-		return sdktrace.AlwaysSample(), nil
+		// 使用 ParentBased 包装，确保即使有父 span 也总是采样
+		return sdktrace.ParentBased(sdktrace.AlwaysSample()), nil
 	case "always_off":
-		return sdktrace.NeverSample(), nil
+		return sdktrace.ParentBased(sdktrace.NeverSample()), nil
 	case "traceidratio":
-		return sdktrace.TraceIDRatioBased(cfg.SamplerRatio), nil
+		return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SamplerRatio)), nil
 	default:
 		return nil, fmt.Errorf("unknown sampler: %s", cfg.Sampler)
 	}
