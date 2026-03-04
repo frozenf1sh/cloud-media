@@ -35,11 +35,14 @@
 
 ### 🏗️ 云原生架构
 *   **异步削峰**：基于 RabbitMQ 构建高可靠任务队列，实现 API 层与计算层的彻底解耦。
-*   **内外网隔离存储**：设计 **MinIO 双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
+*   **多云存储支持**：支持 MinIO、AWS S3、Cloudflare R2 等多种 S3 兼容对象存储。
+*   **CDN 集成**：支持配置 CDN 加速，替代预签名 URL 提升访问速度。
+*   **内外网隔离存储**：设计 **双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
 *   **整洁架构**：严格遵循依赖倒置原则，层级分明（Domain/UseCase/Adapter/Infra），易于测试与维护。
 
 ### 🔭 极致可观测性
-*   **分布式追踪**：集成 OpenTelemetry，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
+*   **分布式追踪**：集成 OpenTelemetry + Grafana Tempo，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
+*   **日志聚合**：Loki + Promtail + Grafana 日志栈，支持 trace_id 关联查询。
 *   **监控指标**：Prometheus Metrics 埋点，覆盖 API 延迟、队列堆积量、转码耗时等关键 SLI/SLO 指标。
 *   **健康检查**：标准的 Kubernetes 探针接口（`/health/live`, `/health/ready`）。
 
@@ -57,9 +60,11 @@
 | **RPC 框架** | [Connect RPC](https://connectrpc.com/) | 支持 gRPC/HTTP 双协议，浏览器友好 |
 | **架构设计** | Clean Architecture | 领域驱动，依赖注入 (Google Wire) |
 | **消息队列** | RabbitMQ | 异步任务解耦，确保最终一致性 |
-| **存储** | PostgreSQL + MinIO | 任务状态持久化与对象存储 |
+| **存储** | PostgreSQL | 任务状态持久化 |
+| **对象存储** | MinIO / AWS S3 / Cloudflare R2 | 支持多种 S3 兼容存储 |
+| **CDN** | Cloudflare CDN (可选) | 全球边缘节点加速 |
 | **转码核心** | FFmpeg | 行业标准音视频处理工具 |
-| **可观测性** | OpenTelemetry + Prometheus | 链路追踪与监控报警 |
+| **可观测性** | OpenTelemetry + Prometheus + Grafana | 日志(Loki) + 追踪(Tempo) + 指标 |
 | **ORM** | GORM | 数据持久层封装 |
 | **IDL 管理** | Protobuf + Buf v2 | 现代化的 API 定义与代码生成 |
 
@@ -150,8 +155,10 @@ docker compose up -d
 | **API Server** | `http://localhost:8080` | - |
 | **MinIO Console** | `http://localhost:9001` | `rootadmin` / `rootpassword` |
 | **RabbitMQ** | `http://localhost:15672` | `guest` / `guest` |
-| **Prometheus** | `http://localhost:9090` | - |
 | **Grafana** | `http://localhost:3000` | `admin` / `password` |
+| **Tempo** (分布式追踪) | `http://localhost:3200` | - |
+
+> **Grafana 数据源配置**: 首次登录 Grafana 后，需手动添加 Loki (日志) 和 Tempo (追踪) 数据源。
 
 ### 验证部署 (E2E Test)
 
@@ -197,6 +204,12 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 
 ## 💡 设计亮点详解
 
+### 多云存储与 CDN 集成
+系统采用**抽象接口 + 实现分离**设计：
+*   **Domain 接口**: `ObjectStorage` 接口定义在领域层，与具体实现解耦。
+*   **多后端支持**: 同一套代码支持 MinIO、AWS S3、Cloudflare R2。
+*   **CDN 优先模式**: 启用 CDN 后，`GetPresignedURL` 直接返回 CDN URL，无需预签名，提升访问速度。
+
 ### MinIO 双 Endpoint 隔离设计
 出于安全性与网络拓扑考虑，系统实现了**双客户端模式**：
 *   **Internal Client (Core)**: 配置内网 DNS (`minio:9000`)，用于 Worker 节点与存储桶之间的高速数据传输，不消耗公网带宽。
@@ -207,7 +220,8 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 1.  **API 层**: 拦截 HTTP Headers，提取 W3C Trace Context。
 2.  **MQ 层**: 将 Trace Context 注入 AMQP Header。
 3.  **Worker 层**: 消费时提取 Context，创建子 Span。
-    *   结果：在 Jaeger/Tempo 中可看到 `HTTP Req -> MQ Publish -> MQ Consume -> FFmpeg Process` 的完整瀑布图。
+    *   结果：在 Grafana Tempo 中可看到 `HTTP Req -> MQ Publish -> MQ Consume -> FFmpeg Process` 的完整瀑布图。
+    *   日志关联：Loki 日志自动包含 `trace_id`，可在 Grafana 中从 Trace 直接跳转到相关日志。
 
 ---
 
@@ -216,10 +230,11 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **基础架构**: Clean Architecture, DI (Wire), GORM, Viper
 *   [x] **核心功能**: 视频上传, HLS 切片, 封面生成
 *   [x] **异步处理**: RabbitMQ 集成与死信队列处理
-*   [x] **可观测性**: Metrics & Tracing (Otel)
+*   [x] **可观测性**: Metrics & Tracing (Otel) + Loki + Tempo
+*   [x] **多云存储**: MinIO / AWS S3 / Cloudflare R2 支持
+*   [x] **CDN 集成**: CDN URL 支持
 *   [x] **CI/CD**: GitHub Actions 自动构建
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
-*   [ ] **CDN 集成**: 自动刷新 CDN 缓存
 *   [ ] **WebHook**: 任务完成回调通知
 
 ---
