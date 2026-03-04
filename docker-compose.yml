@@ -98,6 +98,23 @@ services:
     depends_on:
       - loki
 
+  # Tempo: 分布式追踪系统
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: media-tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo.yaml
+      - tempo_data:/tmp/tempo
+    ports:
+      - "14268:14268"   # jaeger ingest
+      - "3200:3200"    # tempo
+      - "4317:4317"    # otlp grpc
+      - "4318:4318"    # otlp http
+      - "9411:9411"    # zipkin
+    networks:
+      - media-internal
+
   # Grafana: 界面展示
   grafana:
     image: grafana/grafana:latest
@@ -114,6 +131,7 @@ services:
       - media-internal
     depends_on:
       - loki
+      - tempo
 
   # API Server
   api-server:
@@ -160,6 +178,7 @@ volumes:
   postgres_data:
   loki_data:
   grafana_data:
+  tempo_data:
 
 networks:
   media-internal:
