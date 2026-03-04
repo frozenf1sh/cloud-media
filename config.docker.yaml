@@ -20,6 +20,23 @@ database:
 rabbitmq:
   url: amqp://guest:guest@rabbitmq:5672/
 
+# 对象存储配置（支持 MinIO、AWS S3、Cloudflare R2）
+object_storage:
+  type: minio
+  internal_endpoint: minio:9000
+  internal_use_ssl: false
+  external_endpoint: localhost:9000
+  external_use_ssl: false
+  access_key_id: rootadmin
+  secret_access_key: rootpassword
+  region: us-east-1
+
+  # CDN 配置（可选）
+  cdn:
+    enabled: false
+    base_url: ""
+
+# 兼容性配置（保留旧格式）
 minio:
   internal_endpoint: minio:9000
   internal_use_ssl: false

@@ -13,6 +13,7 @@ type Config struct {
 	Database       DatabaseConfig       `mapstructure:"database"`
 	RabbitMQ       RabbitMQConfig       `mapstructure:"rabbitmq"`
 	ObjectStorage  ObjectStorageConfig  `mapstructure:"object_storage"`
+	MinIO          MinIOConfig          `mapstructure:"minio"` // 向后兼容
 	Observability  ObservabilityConfig  `mapstructure:"observability"`
 }
 
@@ -41,6 +42,16 @@ type DatabaseConfig struct {
 // RabbitMQConfig RabbitMQ 配置
 type RabbitMQConfig struct {
 	URL string `mapstructure:"url"`
+}
+
+// MinIOConfig 旧版 MinIO 配置（向后兼容）
+type MinIOConfig struct {
+	InternalEndpoint string `mapstructure:"internal_endpoint"`
+	InternalUseSSL  bool   `mapstructure:"internal_use_ssl"`
+	ExternalEndpoint string `mapstructure:"external_endpoint"`
+	ExternalUseSSL  bool   `mapstructure:"external_use_ssl"`
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key"`
 }
 
 // ObjectStorageType 对象存储类型
@@ -220,4 +231,21 @@ func (s *ServerConfig) Address() string {
 // MetricsAddress 返回 Prometheus 指标监听地址
 func (m *MetricsConfig) Address() string {
 	return fmt.Sprintf(":%d", m.Port)
+}
+
+// MigrateLegacyConfig 迁移旧版 MinIO 配置到新的 ObjectStorage 配置（向后兼容）
+func (c *Config) MigrateLegacyConfig() {
+	// 如果 ObjectStorage 配置为空，但 MinIO 配置存在，则迁移
+	if c.ObjectStorage.InternalEndpoint == "" && c.MinIO.InternalEndpoint != "" {
+		c.ObjectStorage = ObjectStorageConfig{
+			Type:             ObjectStorageTypeMinIO,
+			InternalEndpoint: c.MinIO.InternalEndpoint,
+			InternalUseSSL:   c.MinIO.InternalUseSSL,
+			ExternalEndpoint: c.MinIO.ExternalEndpoint,
+			ExternalUseSSL:   c.MinIO.ExternalUseSSL,
+			AccessKeyID:      c.MinIO.AccessKeyID,
+			SecretAccessKey:  c.MinIO.SecretAccessKey,
+			Region:           "us-east-1",
+		}
+	}
 }
