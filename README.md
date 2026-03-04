@@ -1,315 +1,231 @@
-# cloud-media
+# Cloud-Media
 
-云原生媒体高并发处理平台 - 视频 HLS 切片与转码服务
+<div align="center">
 
-## 功能特性
+![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)
+![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?style=flat&logo=docker)
+![Architecture](https://img.shields.io/badge/Architecture-Clean%20Arch-orange)
+![Observability](https://img.shields.io/badge/Observability-OpenTelemetry-purple)
+![License](https://img.shields.io/badge/License-Apache%202.0-green)
 
-- 🎬 **视频 HLS 切片** - 支持多码率自适应播放
-- 🖼️ **封面自动生成** - 从视频第一帧提取缩略图
-- 📨 **异步任务处理** - 基于 RabbitMQ 的高并发任务队列
-- 💾 **持久化存储** - PostgreSQL 任务状态追踪
-- 📦 **对象存储** - MinIO 双 Endpoint 模式，支持内外网分离
-- 🔌 **整洁架构** - 领域驱动设计，依赖倒置
-- 📐 **智能宽高比** - 横屏/竖屏自适应，保持原始比例
-- ⚠️ **极端比例防护** - 拒绝 1:16 以外或 16:1 以外的极端比例视频
-- 🧪 **E2E 测试** - 端到端测试 + 可视化 HTML 报告
+**基于云原生架构的高并发视频处理平台**
 
-## 技术栈
+[特性概览](#-核心特性) • [架构设计](#-系统架构) • [快速开始](#-快速开始) • [API 文档](#-api-接口)
 
-- **RPC 框架**: [Connect RPC](https://connectrpc.com/)
-- **IDL**: Protobuf + [Buf v2](https://buf.build/)
-- **依赖注入**: [Google Wire](https://github.com/google/wire)
-- **ORM**: [GORM](https://gorm.io/)
-- **消息队列**: RabbitMQ
-- **对象存储**: MinIO（双 Endpoint 模式）
-- **数据库**: PostgreSQL
-- **容器化**: Docker Compose
+</div>
 
-## 项目架构
+---
 
-采用标准的**整洁架构 (Clean Architecture)** + **golang-standards/project-layout** 布局。
+## 📖 项目简介
+
+**Cloud-Media** 是一个生产级标准的分布式视频处理系统，专为解决高并发场景下的视频转码与分发挑战而设计。
+
+项目采用 **整洁架构 (Clean Architecture)** 与 **领域驱动设计 (DDD)** 思想，实现了从视频上传、异步切片 (HLS)、缩略图生成到持久化存储的全链路流程。系统集成了 **OpenTelemetry** 可观测性体系，支持从 API 网关到后台 Worker 的全链路分布式追踪，适用于构建高吞吐、可扩展的流媒体服务。
+
+> **适用场景**：短视频平台后台、在线教育点播服务、企业级媒体资产管理。
+
+---
+
+## ✨ 核心特性
+
+### 🎥 媒体处理引擎
+*   **HLS 自适应流**：基于 FFmpeg 实现多码率切片（1080p/720p/480p），支持 HLS 协议分发。
+*   **智能宽高比**：内置智能缩放算法，自动识别横/竖屏，拒绝极端比例（1:16/16:1 限制），保持画面原始比例。
+*   **封面自动截取**：高效提取视频首帧作为预览缩略图。
+
+### 🏗️ 云原生架构
+*   **异步削峰**：基于 RabbitMQ 构建高可靠任务队列，实现 API 层与计算层的彻底解耦。
+*   **内外网隔离存储**：设计 **MinIO 双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
+*   **整洁架构**：严格遵循依赖倒置原则，层级分明（Domain/UseCase/Adapter/Infra），易于测试与维护。
+
+### 🔭 极致可观测性
+*   **分布式追踪**：集成 OpenTelemetry，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
+*   **监控指标**：Prometheus Metrics 埋点，覆盖 API 延迟、队列堆积量、转码耗时等关键 SLI/SLO 指标。
+*   **健康检查**：标准的 Kubernetes 探针接口（`/health/live`, `/health/ready`）。
+
+### 🛡️ 质量保障 (QA)
+*   **E2E 测试体系**：包含完整的端到端集成测试，自动生成可视化的 HTML 测试报告。
+*   **CI/CD 流水线**：基于 GitHub Actions 实现自动化构建、测试与镜像推送。
+
+---
+
+## 🛠 技术栈
+
+| 领域 | 技术选型 | 说明 |
+| :--- | :--- | :--- |
+| **语言** | Golang (1.23+) | 高性能并发处理 |
+| **RPC 框架** | [Connect RPC](https://connectrpc.com/) | 支持 gRPC/HTTP 双协议，浏览器友好 |
+| **架构设计** | Clean Architecture | 领域驱动，依赖注入 (Google Wire) |
+| **消息队列** | RabbitMQ | 异步任务解耦，确保最终一致性 |
+| **存储** | PostgreSQL + MinIO | 任务状态持久化与对象存储 |
+| **转码核心** | FFmpeg | 行业标准音视频处理工具 |
+| **可观测性** | OpenTelemetry + Prometheus | 链路追踪与监控报警 |
+| **ORM** | GORM | 数据持久层封装 |
+| **IDL 管理** | Protobuf + Buf v2 | 现代化的 API 定义与代码生成 |
+
+---
+
+## 📐 系统架构
+
+### 分层架构图
+
+遵循 **Clean Architecture**，外部依赖向内辐射，核心业务逻辑保持纯净。
+
+```mermaid
+graph TD
+    subgraph Infrastructure ["基础设施层 (Infrastructure)"]
+        DB[(PostgreSQL)]
+        MQ[(RabbitMQ)]
+        MinIO[(MinIO Object Storage)]
+        FFmpeg[FFmpeg Transcoder]
+    end
+
+    subgraph Adapters ["适配器层 (Interface Adapters)"]
+        RPC[Connect RPC Handler]
+        RepoImpl[GORM Repository]
+        BrokerImpl[RabbitMQ Producer/Consumer]
+    end
+
+    subgraph UseCase ["应用逻辑层 (Use Cases)"]
+        Logic[Video Processing Logic]
+        Worker[Async Task Orchestrator]
+    end
+
+    subgraph Domain ["领域层 (Domain)"]
+        Entity[Video Entity]
+        Rules[Business Rules]
+    end
+
+    RPC --> Logic
+    Logic --> Entity
+    Logic --> RepoImpl
+    RepoImpl --> DB
+    Worker --> FFmpeg
+    Worker --> MinIO
+```
 
 ### 目录结构
 
-```
+采用 Go 社区标准布局 `golang-standards/project-layout`：
+
+```text
 cloud-media/
-├── cmd/                          # 应用入口
-│   ├── api-server/              # API 服务器
-│   │   ├── main.go
-│   │   ├── wire.go              # Wire 配置
-│   │   ├── wire_gen.go          # Wire 生成 (不要编辑)
-│   │   └── server.go
-│   └── worker/                  # Worker 服务（消费 MQ + 转码）
-│       ├── main.go
-│       ├── wire.go
-│       └── wire_gen.go
-├── internal/                     # 私有应用代码
-│   ├── domain/                  # 领域层 (Enterprise Business Rules)
-│   │   └── video.go             # 实体和接口定义
-│   ├── usecase/                 # 用例层 (Application Business Rules)
-│   │   ├── video_usecase.go     # API 业务逻辑
-│   │   └── worker.go            # Worker 业务逻辑
-│   ├── adapter/                 # 适配器层 (Interface Adapters)
-│   │   └── rpc/                 # RPC 适配器
-│   └── infrastructure/          # 基础设施层 (Frameworks & Drivers)
-│       ├── broker/              # RabbitMQ
-│       ├── persistence/         # PostgreSQL + GORM
-│       ├── storage/             # MinIO 对象存储
-│       └── transcoder/          # FFmpeg 转码器
-├── pkg/                          # 公共库（可被外部引用）
-│   ├── config/                  # 配置管理
-│   ├── logger/                  # 日志系统
-│   ├── interceptor/             # 拦截器
-│   └── ffmpeg/                  # FFmpeg 基础封装
-│       ├── ffmpeg.go            # FFmpeg 命令封装
-│       ├── ffprobe.go           # FFprobe 命令封装
-│       ├── video_info.go        # 视频信息解析
-│       ├── scale.go             # 缩放计算和宽高比验证
-│       └── progress.go          # 进度解析
-├── proto/                        # Protobuf 定义
-├── test/                         # 测试
-│   └── e2e/                     # 端到端测试
-│       ├── main.go              # E2E 测试程序
-│       └── template.html        # HTML 报告模板
-├── doc/                          # 文档
-│   ├── DATABASE_DESIGN.md       # 数据库设计文档
-│   ├── DATABASE_DESIGN_V2.md    # HLS 扩展设计
-│   └── TODO.md                  # 开发任务列表
-├── docker-compose.yml            # 本地开发环境
-└── go.mod
+├── cmd/                  # 应用程序入口 (Main)
+├── internal/             # 私有业务代码
+│   ├── domain/           # 领域层 (实体, 接口定义)
+│   ├── usecase/          # 应用层 (业务编排)
+│   ├── adapter/          # 适配层 (RPC Handler, Repo实现)
+│   └── infrastructure/   # 基础层 (DB驱动, MQ客户端, FFmpeg封装)
+├── pkg/                  # 公共库 (Logger, Metrics, Interceptor)
+├── proto/                # API 定义 (Protobuf)
+├── test/                 # E2E 测试与测试数据
+└── deploy/               # Docker & K8s 配置
 ```
 
-### 架构图
+---
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  适配器层 (Adapter)         ◄──  Connect RPC                │
-│                               ────  转换数据格式              │
-├─────────────────────────────────────────────────────────────┤
-│  用例层 (Use Case)           ◄──  业务逻辑                   │
-│                               ────  编排领域对象              │
-├─────────────────────────────────────────────────────────────┤
-│  领域层 (Domain)             ◄──  VideoTask, Repository      │
-│                               ────  核心业务规则              │
-├─────────────────────────────────────────────────────────────┤
-│  基础设施层 (Infrastructure) ◄──  PostgreSQL/RabbitMQ/MinIO  │
-│                               ────  GORM 实现                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 数据库设计
-
-- **video_tasks** - 视频任务主表，支持 JSONB 灵活扩展 HLS 输出信息
-- **task_status_logs** - 任务状态变更历史
-
-详见 [doc/DATABASE_DESIGN_V2.md](doc/DATABASE_DESIGN_V2.md)
-
-### MinIO 双 Endpoint 设计
-
-**亮点**
-
-采用**双客户端模式**，分离内外网：
-
-| 客户端 | Endpoint | 用途 |
-|---------|----------|------|
-| **coreClient** | 内网 | 上传、下载、Bucket 管理 |
-| **signerClient** | 外网 | 仅生成预签名 URL |
-
-**配置示例**：
-
-```go
-Config{
-    InternalEndpoint: "minio:9000",   // 内网
-    ExternalEndpoint: "", // 外网
-}
-```
-
-## 快速开始
+## 🚀 快速开始
 
 ### 前置要求
+*   Docker & Docker Compose
+*   Go 1.23+ (仅本地开发需要)
 
-- Go 1.25+
-- Docker & Docker Compose
-- Wire CLI (`go install github.com/google/wire/cmd/wire@latest`)
-- Buf CLI
+### 一键启动 (推荐)
 
-### 方式一：Docker Compose 一键启动（推荐）
+我们提供了完整的 Docker Compose 环境，包含所有依赖服务。
 
 ```bash
-# 1. 构建镜像
-docker build --target api-server -t cloud-media-api-server .
-docker build --target worker -t cloud-media-worker .
+# 1. 克隆仓库
+git clone https://github.com/frozenf1sh/cloud-media.git
+cd cloud-media
 
-# 2. 启动全部服务
+# 2. 启动服务集群
 docker compose up -d
 ```
 
-全部服务:
-- API Server: http://localhost:8080
-- MinIO: http://localhost:9001 (rootadmin / rootpassword)
-- RabbitMQ: http://localhost:15672 (guest / guest)
-- PostgreSQL: localhost:5432 (postgres / password)
-- Grafana: http://localhost:3000 (admin / password)
+启动后，您可以访问以下服务：
 
-### 方式二：本地开发
+| 服务 | 地址 | 凭证 (默认) |
+| :--- | :--- | :--- |
+| **API Server** | `http://localhost:8080` | - |
+| **MinIO Console** | `http://localhost:9001` | `rootadmin` / `rootpassword` |
+| **RabbitMQ** | `http://localhost:15672` | `guest` / `guest` |
+| **Prometheus** | `http://localhost:9090` | - |
+| **Grafana** | `http://localhost:3000` | `admin` / `password` |
 
-#### 1. 启动基础设施
+### 验证部署 (E2E Test)
 
-```bash
-docker compose up -d minio rabbitmq postgres
-```
-
-#### 2. 生成代码
+运行端到端测试以验证系统功能完整性：
 
 ```bash
-# 生成 protobuf 代码
-./scripts/bufgen.sh
+# 运行 E2E 测试工具
+go run ./test/e2e -video ./test/assets/sample.mp4
 
-# 生成依赖注入
-cd cmd/api-server && wire
-cd ../worker && wire
+# 测试完成后，打开生成的 test_result.html 查看可视化报告
+open test_result.html
 ```
 
-#### 3. 运行服务
+---
 
-**启动 API Server:**
-```bash
-go run ./cmd/api-server
-```
+## 🔌 API 接口
 
-**启动 Worker:**
-```bash
-go run ./cmd/worker
-```
+服务采用 Protobuf 定义，支持 gRPC 与 HTTP/JSON 调用。
 
-API 服务将在 `http://localhost:8080` 启动。
-
-#### 4. 运行 E2E 测试
-
-```bash
-go run ./test/e2e -video /path/to/video.mp4
-```
-
-测试完成后会生成 `test_result.html` 报告。
-
-详见 [test/README.md](test/README.md)
-
-### Docker 构建
-
-项目根目录包含多阶段构建的 `Dockerfile`，支持两个服务：
-
-**构建 API Server 镜像：**
-```bash
-docker build --target api-server -t cloud-media-api-server .
-```
-
-**构建 Worker 镜像：**
-```bash
-docker build --target worker -t cloud-media-worker .
-```
-
-**镜像特性：**
-- 基于 Alpine Linux，体积小
-- 包含 FFmpeg
-- 多阶段构建，最终镜像仅包含二进制文件
-
-**运行示例：**
-```bash
-# API Server
-docker run -d --name cloud-media-api \
-  -p 8080:8080 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  cloud-media-api-server
-
-# Worker
-docker run -d --name cloud-media-worker \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  cloud-media-worker
-```
-
-## API 接口
-
-### SubmitTask - 提交转码任务
+### 1. 提交转码任务
 
 ```bash
 curl -X POST http://localhost:8080/api.v1.VideoService/SubmitTask \
   -H "Content-Type: application/json" \
   -d '{
-    "task_id": "test-001",
+    "task_id": "demo-task-01",
     "source_bucket": "media-input",
-    "source_key": "videos/test.mp4"
+    "source_key": "videos/demo.mp4"
   }'
 ```
 
-### GetTaskStatus - 获取任务状态
+### 2. 查询任务状态
 
 ```bash
 curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
   -H "Content-Type: application/json" \
-  -d '{"task_id": "test-001"}'
+  -d '{"task_id": "demo-task-01"}'
 ```
 
-### ListTasks - 列出任务
+> 完整 API 定义请参考 `proto/` 目录下的 `.proto` 文件。
 
-```bash
-curl -X POST http://localhost:8080/api.v1.VideoService/ListTasks \
-  -H "Content-Type: application/json" \
-  -d '{"page": 1, "page_size": 20}'
-```
+---
 
-### CancelTask - 取消任务
+## 💡 设计亮点详解
 
-```bash
-curl -X POST http://localhost:8080/api.v1.VideoService/CancelTask \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": "test-001"}'
-```
+### MinIO 双 Endpoint 隔离设计
+出于安全性与网络拓扑考虑，系统实现了**双客户端模式**：
+*   **Internal Client (Core)**: 配置内网 DNS (`minio:9000`)，用于 Worker 节点与存储桶之间的高速数据传输，不消耗公网带宽。
+*   **External Client (Signer)**: 配置公网域名/IP，专门用于生成 Presigned URL，确保前端用户能直接通过浏览器上传/下载，而无需流量经过 API Server。
 
-## 开发指南
+### 全链路可观测性
+系统解决了异步架构中 Trace Context 丢失的痛点：
+1.  **API 层**: 拦截 HTTP Headers，提取 W3C Trace Context。
+2.  **MQ 层**: 将 Trace Context 注入 AMQP Header。
+3.  **Worker 层**: 消费时提取 Context，创建子 Span。
+    *   结果：在 Jaeger/Tempo 中可看到 `HTTP Req -> MQ Publish -> MQ Consume -> FFmpeg Process` 的完整瀑布图。
 
-### 项目状态
+---
 
-- ✅ Domain 层 - 完整
-- ✅ Infrastructure 层 - 数据库 + MQ + MinIO 完成
-- ✅ API 层 - 完整
-- ✅ MinIO 集成 - 已完成（双 Endpoint 模式）
-- ✅ Worker 服务 - 已完成
-- ✅ FFmpeg 转码 - 已完成（HLS 切片、多码率、智能宽高比）
-- ✅ pkg/ffmpeg - FFmpeg/FFprobe 基础封装
-- ✅ E2E 测试 - 端到端测试 + HTML 报告
+## 🛣️ 路线图 (Roadmap)
 
-详见 [doc/TODO.md](doc/TODO.md)
+*   [x] **基础架构**: Clean Architecture, DI (Wire), GORM, Viper
+*   [x] **核心功能**: 视频上传, HLS 切片, 封面生成
+*   [x] **异步处理**: RabbitMQ 集成与死信队列处理
+*   [x] **可观测性**: Metrics & Tracing (Otel)
+*   [x] **CI/CD**: GitHub Actions 自动构建
+*   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
+*   [ ] **CDN 集成**: 自动刷新 CDN 缓存
+*   [ ] **WebHook**: 任务完成回调通知
 
-### 智能宽高比处理
+---
 
-**横屏视频**（宽 ≥ 高）：
-- 固定目标高度（1080/720/480）
-- 按比例计算宽度
+## 🤝 贡献与许可
 
-**竖屏视频**（高 > 宽）：
-- 固定目标宽度（1080/720/480）
-- 按比例计算高度
+欢迎提交 PR 或 Issue！
 
-**宽高比限制**：
-- 允许范围：1:16 ~ 16:1
-- 超出范围拒绝处理
-
-### 重新生成代码
-
-```bash
-# Buf 生成 proto 代码
-./scripts/bufgen.sh
-
-# Wire 生成依赖注入
-cd cmd/api-server && wire
-cd ../worker && wire
-```
-
-### 项目布局参考
-
-- [golang-standards/project-layout](https://github.com/golang-standards/project-layout)
-- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
-
-## License
-
-[Apache License 2.0](LICENSE)
+本项目基于 [Apache License 2.0](LICENSE) 开源。
