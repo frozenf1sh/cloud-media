@@ -34,12 +34,12 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	storageConfig := provideMinIOConfig(cfg)
-	minIOStorage, err := storage.NewMinIOStorage(storageConfig)
+	objectStorageConfig := provideObjectStorageConfig(cfg)
+	s3CompatStorage, err := storage.NewS3CompatStorage(objectStorageConfig)
 	if err != nil {
 		return nil, err
 	}
-	workerUseCase := usecase.NewWorkerUseCase(videoTaskRepository, fFmpegTranscoder, minIOStorage)
+	workerUseCase := usecase.NewWorkerUseCase(videoTaskRepository, fFmpegTranscoder, s3CompatStorage)
 	database := persistence.NewDatabase(db)
 	worker := NewWorker(rabbitMQBroker, workerUseCase, database)
 	return worker, nil
@@ -49,7 +49,7 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 
 var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, provideRabbitMQURL,
 	provideDatabaseConfig,
-	provideMinIOConfig,
+	provideObjectStorageConfig,
 )
 
 func provideRabbitMQURL(cfg *config.Config) string {
@@ -67,13 +67,6 @@ func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
 	}
 }
 
-func provideMinIOConfig(cfg *config.Config) *storage.Config {
-	return &storage.Config{
-		InternalEndpoint: cfg.MinIO.InternalEndpoint,
-		InternalUseSSL:   cfg.MinIO.InternalUseSSL,
-		ExternalEndpoint: cfg.MinIO.ExternalEndpoint,
-		ExternalUseSSL:   cfg.MinIO.ExternalUseSSL,
-		AccessKeyID:      cfg.MinIO.AccessKeyID,
-		SecretAccessKey:  cfg.MinIO.SecretAccessKey,
-	}
+func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig {
+	return &cfg.ObjectStorage
 }
