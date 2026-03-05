@@ -38,6 +38,62 @@ object_storage:
     base_url: "https://cdn.example.com"
     # url_signing_secret: ""  # 用于 CDN URL 签名（可选）
 
+# ============================================
+# Cloudflare R2 配置示例（取消注释使用）
+# ============================================
+# object_storage:
+#   type: r2
+#   # R2 Endpoint 格式: https://<account_id>.r2.cloudflarestorage.com
+#   internal_endpoint: <account_id>.r2.cloudflarestorage.com
+#   internal_use_ssl: true
+#   external_endpoint: <account_id>.r2.cloudflarestorage.com
+#   external_use_ssl: true
+#   access_key_id: <your_access_key_id>
+#   secret_access_key: <your_secret_access_key>
+#   region: auto  # R2 固定使用 "auto"
+#   cdn:
+#     enabled: true
+#     base_url: "https://media.yourdomain.com"
+
+# 转码器配置
+transcoder:
+  # 输出存储桶
+  output_bucket: "media-output"
+  # HLS 分片时长（秒）
+  hls_time: 6
+  # 视频编码器
+  video_codec: "libx264"
+  # 音频编码器
+  audio_codec: "aac"
+  # 音频码率
+  audio_bitrate: "128k"
+  # 编码预设（ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow）
+  preset: "fast"
+  # 关键帧间隔（帧数）
+  gop_size: 48
+  # 封面最大尺寸
+  thumbnail_size: 1080
+  # 超时倍数（视频时长 × 此倍数）
+  timeout_multiplier: 3.0
+  # 最小超时时间（分钟）
+  min_timeout: 10
+  # 最大超时时间（分钟）
+  max_timeout: 120
+  # 多码率变体配置
+  variants:
+    - name: "1080p"
+      target_size: 1080
+      bitrate: "4000k"
+      bandwidth: 4000000
+    - name: "720p"
+      target_size: 720
+      bitrate: "2000k"
+      bandwidth: 2000000
+    - name: "480p"
+      target_size: 480
+      bitrate: "1000k"
+      bandwidth: 1000000
+
 # 兼容性配置（保留旧格式，会被 object_storage 覆盖）
 minio:
   internal_endpoint: localhost:9000
