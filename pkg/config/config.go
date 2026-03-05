@@ -8,13 +8,12 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Server         ServerConfig         `mapstructure:"server"`
-	Log            LogConfig            `mapstructure:"log"`
-	Database       DatabaseConfig       `mapstructure:"database"`
-	RabbitMQ       RabbitMQConfig       `mapstructure:"rabbitmq"`
-	ObjectStorage  ObjectStorageConfig  `mapstructure:"object_storage"`
-	MinIO          MinIOConfig          `mapstructure:"minio"` // 向后兼容
-	Observability  ObservabilityConfig  `mapstructure:"observability"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Log           LogConfig           `mapstructure:"log"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
+	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
 // ServerConfig HTTP 服务器配置
@@ -42,16 +41,6 @@ type DatabaseConfig struct {
 // RabbitMQConfig RabbitMQ 配置
 type RabbitMQConfig struct {
 	URL string `mapstructure:"url"`
-}
-
-// MinIOConfig 旧版 MinIO 配置（向后兼容）
-type MinIOConfig struct {
-	InternalEndpoint string `mapstructure:"internal_endpoint"`
-	InternalUseSSL  bool   `mapstructure:"internal_use_ssl"`
-	ExternalEndpoint string `mapstructure:"external_endpoint"`
-	ExternalUseSSL  bool   `mapstructure:"external_use_ssl"`
-	AccessKeyID     string `mapstructure:"access_key_id"`
-	SecretAccessKey string `mapstructure:"secret_access_key"`
 }
 
 // ObjectStorageType 对象存储类型
@@ -112,10 +101,10 @@ type MetricsConfig struct {
 
 // TracingConfig OpenTelemetry 追踪配置
 type TracingConfig struct {
-	Enabled     bool   `mapstructure:"enabled"`
-	Exporter    string `mapstructure:"exporter"`     // otlp, stdout, none
-	OTLPEndpoint string `mapstructure:"otlp_endpoint"` // OTLP 接收端地址
-	Sampler     string `mapstructure:"sampler"`      // always_on, always_off, traceidratio
+	Enabled     bool    `mapstructure:"enabled"`
+	Exporter    string  `mapstructure:"exporter"`     // otlp, stdout, none
+	OTLPEndpoint string  `mapstructure:"otlp_endpoint"` // OTLP 接收端地址
+	Sampler     string  `mapstructure:"sampler"`      // always_on, always_off, traceidratio
 	SamplerRatio float64 `mapstructure:"sampler_ratio"`
 }
 
@@ -133,7 +122,7 @@ func Load(filePath string) (*Config, error) {
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
-		v.AddConfigPath("./configs")
+		v.AddConfigPath("./config")
 		v.AddConfigPath("/etc/cloud-media")
 	}
 
@@ -194,7 +183,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("rabbitmq.url", "amqp://guest:guest@localhost:5672/")
 
-	// 对象存储默认配置（兼容旧版 MinIO 配置）
+	// 对象存储默认配置
 	v.SetDefault("object_storage.type", "minio")
 	v.SetDefault("object_storage.internal_endpoint", "localhost:9000")
 	v.SetDefault("object_storage.internal_use_ssl", false)
@@ -231,21 +220,4 @@ func (s *ServerConfig) Address() string {
 // MetricsAddress 返回 Prometheus 指标监听地址
 func (m *MetricsConfig) Address() string {
 	return fmt.Sprintf(":%d", m.Port)
-}
-
-// MigrateLegacyConfig 迁移旧版 MinIO 配置到新的 ObjectStorage 配置（向后兼容）
-func (c *Config) MigrateLegacyConfig() {
-	// 如果 ObjectStorage 配置为空，但 MinIO 配置存在，则迁移
-	if c.ObjectStorage.InternalEndpoint == "" && c.MinIO.InternalEndpoint != "" {
-		c.ObjectStorage = ObjectStorageConfig{
-			Type:             ObjectStorageTypeMinIO,
-			InternalEndpoint: c.MinIO.InternalEndpoint,
-			InternalUseSSL:   c.MinIO.InternalUseSSL,
-			ExternalEndpoint: c.MinIO.ExternalEndpoint,
-			ExternalUseSSL:   c.MinIO.ExternalUseSSL,
-			AccessKeyID:      c.MinIO.AccessKeyID,
-			SecretAccessKey:  c.MinIO.SecretAccessKey,
-			Region:           "us-east-1",
-		}
-	}
 }

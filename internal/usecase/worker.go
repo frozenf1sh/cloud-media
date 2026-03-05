@@ -96,19 +96,22 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 		return uc.handleTaskError(ctx, task, "failed to download source video", err)
 	}
 
-	// 2. 获取视频信息并更新任务
+	// 2. 获取并验证视频信息，同时更新任务
 	videoInfo, err := uc.transcoder.GetVideoInfo(ctx, inputPath)
-	if err == nil {
-		task.SourceDuration = videoInfo.Duration
-		task.SourceSize = videoInfo.FileSize
-		if err := uc.repository.Update(ctx, task); err != nil {
-			logger.WarnContext(ctx, "Failed to update video info",
-				logger.Err(err),
-				logger.String("task_id", task.TaskID))
-		}
+	if err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
+		return uc.handleTaskError(ctx, task, "invalid video file", err)
+	}
+	task.SourceDuration = videoInfo.Duration
+	task.SourceSize = videoInfo.FileSize
+	if err := uc.repository.Update(ctx, task); err != nil {
+		logger.WarnContext(ctx, "Failed to update video info",
+			logger.Err(err),
+			logger.String("task_id", task.TaskID))
 	}
 
-	// 3. 执行转码
+	// 3. 执行转码（直接传入已获取的 videoInfo，避免重复 FFprobe 调用）
 	outputDir := filepath.Join(workDir, "output")
 	logger.InfoContext(ctx, "Starting transcoding",
 		logger.String("task_id", task.TaskID),
@@ -142,7 +145,7 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 		}
 	}
 
-	outputInfo, err := uc.transcoder.Transcode(ctx, inputPath, outputDir, transcodeConfig, progressCallback)
+	outputInfo, err := uc.transcoder.Transcode(ctx, inputPath, outputDir, transcodeConfig, videoInfo, progressCallback)
 	if err != nil {
 		telemetry.RecordError(ctx, err)
 		metrics.RecordTaskCompleted("failed", time.Since(startTime))

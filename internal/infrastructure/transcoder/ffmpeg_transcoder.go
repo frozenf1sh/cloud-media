@@ -75,6 +75,7 @@ func (t *FFmpegTranscoder) Transcode(
 	inputPath string,
 	outputDir string,
 	config *domain.TranscodeConfig,
+	videoInfo *domain.VideoInfo,
 	onProgress domain.TranscodeProgressCallback,
 ) (*domain.OutputInfo, error) {
 	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.Transcode")
@@ -82,30 +83,26 @@ func (t *FFmpegTranscoder) Transcode(
 
 	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
-	// 1. 验证输入文件
-	if err := t.videoValidator.Validate(ctx, inputPath); err != nil {
-		telemetry.RecordError(ctx, err)
-		return nil, fmt.Errorf("invalid video file: %w", err)
+	// 如果没有传入 videoInfo，则获取并验证
+	if videoInfo == nil {
+		var err error
+		videoInfo, err = t.GetVideoInfo(ctx, inputPath)
+		if err != nil {
+			telemetry.RecordError(ctx, err)
+			return nil, err
+		}
 	}
 
-	// 2. 创建输出目录
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		telemetry.RecordError(ctx, err)
-		return nil, fmt.Errorf("failed to create output dir: %w", err)
-	}
-
-	// 3. 获取视频信息
-	videoInfo, err := t.GetVideoInfo(ctx, inputPath)
-	if err != nil {
-		log.WarnContext(ctx, "Failed to get video info, using defaults", logger.Err(err))
-		telemetry.RecordError(ctx, err)
-		videoInfo = &domain.VideoInfo{Duration: 0}
-	}
-
-	// 4. 验证宽高比
+	// 验证宽高比
 	if err := t.aspectValidator.Validate(videoInfo.Width, videoInfo.Height); err != nil {
 		telemetry.RecordError(ctx, err)
 		return nil, err
+	}
+
+	// 创建输出目录
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		telemetry.RecordError(ctx, err)
+		return nil, fmt.Errorf("failed to create output dir: %w", err)
 	}
 
 	// 定义多码率变体（目标高度/宽度）
@@ -287,27 +284,28 @@ func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain
 	return os.WriteFile(path, []byte(sb.String()), 0644)
 }
 
-// GetVideoInfo 获取视频信息
+// GetVideoInfo 获取并验证视频信息
 func (t *FFmpegTranscoder) GetVideoInfo(ctx context.Context, inputPath string) (*domain.VideoInfo, error) {
 	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.GetVideoInfo")
 	defer span.End()
 
-	info, err := t.videoInfoParser.Parse(ctx, inputPath)
+	// 验证输入文件，同时获取视频信息
+	ffmpegVideoInfo, err := t.videoValidator.ValidateAndGetInfo(ctx, inputPath)
 	if err != nil {
 		telemetry.RecordError(ctx, err)
-		return nil, err
+		return nil, fmt.Errorf("invalid video file: %w", err)
 	}
 
 	// 转换为 domain.VideoInfo
 	return &domain.VideoInfo{
-		Duration:   info.Duration,
-		Width:      info.Width,
-		Height:     info.Height,
-		Codec:      info.Codec,
-		Bitrate:    info.Bitrate,
-		FPS:        info.FPS,
-		AudioCodec: info.AudioCodec,
-		FileSize:   info.FileSize,
+		Duration:   ffmpegVideoInfo.Duration,
+		Width:      ffmpegVideoInfo.Width,
+		Height:     ffmpegVideoInfo.Height,
+		Codec:      ffmpegVideoInfo.Codec,
+		Bitrate:    ffmpegVideoInfo.Bitrate,
+		FPS:        ffmpegVideoInfo.FPS,
+		AudioCodec: ffmpegVideoInfo.AudioCodec,
+		FileSize:   ffmpegVideoInfo.FileSize,
 	}, nil
 }
 

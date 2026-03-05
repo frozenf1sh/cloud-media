@@ -94,8 +94,6 @@ func main() {
 		log.Warn("Failed to load config, using defaults", "error", err)
 		cfg = config.Default()
 	}
-	// 迁移旧版配置（向后兼容）
-	cfg.MigrateLegacyConfig()
 
 	// 初始化测试配置
 	testCfg := &TestConfig{
