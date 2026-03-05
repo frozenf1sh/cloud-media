@@ -30,7 +30,8 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 		return nil, err
 	}
 	videoTaskRepository := persistence.NewVideoTaskRepository(db)
-	fFmpegTranscoder, err := transcoder.NewFFmpegTranscoder()
+	transcoderConfig := provideTranscoderConfig(cfg)
+	fFmpegTranscoder, err := transcoder.NewFFmpegTranscoder(transcoderConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,7 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, provideRabbitMQURL,
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
+	provideTranscoderConfig,
 )
 
 func provideRabbitMQURL(cfg *config.Config) string {
@@ -69,4 +71,8 @@ func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
 
 func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig {
 	return &cfg.ObjectStorage
+}
+
+func provideTranscoderConfig(cfg *config.Config) config.TranscoderConfig {
+	return cfg.Transcoder
 }

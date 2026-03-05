@@ -271,6 +271,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **统一错误处理**: pkg/errors 包，视频文件验证，边界情况处理
 *   [x] **OTel Span 状态**: 错误时设置 Span Status 为 Error，成功时设置为 OK
 *   [x] **单元测试**: pkg/errors、pkg/ffmpeg、pkg/telemetry 完整测试覆盖
+*   [x] **可配置转码参数**: FFmpeg 所有硬编码参数现在可配置
 
 ### 进行中
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
