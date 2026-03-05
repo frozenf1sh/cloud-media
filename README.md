@@ -31,6 +31,7 @@
 ### 🎥 媒体处理引擎
 *   **HLS 自适应流**：基于 FFmpeg 实现多码率切片（1080p/720p/480p），支持 HLS 协议分发。
 *   **智能宽高比**：内置智能缩放算法，自动识别横/竖屏，拒绝极端比例（1:16/16:1 限制），保持画面原始比例。
+*   **视频文件验证**：魔数检测 + FFprobe 双重验证，快速拒绝非视频文件，节约资源。
 *   **封面自动截取**：高效提取视频首帧作为预览缩略图。
 
 ### 🏗️ 云原生架构
@@ -38,16 +39,20 @@
 *   **多云存储支持**：支持 MinIO、AWS S3、Cloudflare R2 等多种 S3 兼容对象存储。
 *   **CDN 集成**：支持配置 CDN 加速，替代预签名 URL 提升访问速度。
 *   **内外网隔离存储**：设计 **双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
+*   **双服务独立配置**：API Server 和 Worker 使用独立配置文件，支持不同的服务名和端口配置。
 *   **整洁架构**：严格遵循依赖倒置原则，层级分明（Domain/UseCase/Adapter/Infra），易于测试与维护。
 
 ### 🔭 极致可观测性
 *   **分布式追踪**：集成 OpenTelemetry + Grafana Tempo，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
+*   **Span 状态管理**：错误时自动设置 Span Status 为 Error，成功时设置为 OK，在 Grafana 中正确显示。
 *   **日志聚合**：Loki + Promtail + Grafana 日志栈，支持 trace_id 关联查询。
 *   **监控指标**：Prometheus Metrics 埋点，覆盖 API 延迟、队列堆积量、转码耗时等关键 SLI/SLO 指标。
-*   **健康检查**：标准的 Kubernetes 探针接口（`/health/live`, `/health/ready`）。
+*   **健康检查**：标准的 Kubernetes 探针接口（`/health/live`, `/health/ready`），Docker Compose 中已配置健康检查。
 
 ### 🛡️ 质量保障 (QA)
 *   **E2E 测试体系**：包含完整的端到端集成测试，自动生成可视化的 HTML 测试报告。
+*   **单元测试**：pkg/errors、pkg/ffmpeg、pkg/telemetry 等核心包完整测试覆盖。
+*   **统一错误处理**：pkg/errors 包提供统一的错误类型和错误码，支持 Connect RPC 错误映射。
 *   **CI/CD 流水线**：基于 GitHub Actions 实现自动化构建、测试与镜像推送。
 
 ---
@@ -160,6 +165,21 @@ docker compose up -d
 
 > **Grafana 数据源配置**: 首次登录 Grafana 后，需手动添加 Loki (日志) 和 Tempo (追踪) 数据源。
 
+### 配置文件
+
+API Server 和 Worker 使用独立的配置文件：
+
+| 配置文件 | 说明 |
+| :--- | :--- |
+| `config.api-server.yaml.example` | API Server 配置模板 |
+| `config.worker.yaml.example` | Worker 配置模板 |
+| `config.api-server.docker.yaml` | API Server Docker 环境配置 |
+| `config.worker.docker.yaml` | Worker Docker 环境配置 |
+
+主要配置差异：
+- **ServiceName**: API Server 使用 `cloud-media-api-server`，Worker 使用 `cloud-media-worker`
+- **Port**: API Server 使用 8080，Worker 使用 9090 提供健康检查和 metrics
+
 ### 开发脚本
 
 项目提供了便捷脚本以简化开发流程：
@@ -238,6 +258,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 
 ## 🛣️ 路线图 (Roadmap)
 
+### 已完成
 *   [x] **基础架构**: Clean Architecture, DI (Wire), GORM, Viper
 *   [x] **核心功能**: 视频上传, HLS 切片, 封面生成
 *   [x] **异步处理**: RabbitMQ 集成与死信队列处理
@@ -245,8 +266,21 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **多云存储**: MinIO / AWS S3 / Cloudflare R2 支持
 *   [x] **CDN 集成**: CDN URL 支持
 *   [x] **CI/CD**: GitHub Actions 自动构建
+*   [x] **双服务独立配置**: API Server 和 Worker 使用独立配置文件
+*   [x] **Docker Compose 健康检查**: 两个服务都配置了健康检查
+*   [x] **统一错误处理**: pkg/errors 包，视频文件验证，边界情况处理
+*   [x] **OTel Span 状态**: 错误时设置 Span Status 为 Error，成功时设置为 OK
+*   [x] **单元测试**: pkg/errors、pkg/ffmpeg、pkg/telemetry 完整测试覆盖
+
+### 进行中
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
 *   [ ] **WebHook**: 任务完成回调通知
+
+### 未来规划
+*   [ ] **Kubernetes 迁移**: 迁移到 k3s
+*   [ ] **KEDA 动态扩缩容**: 基于 RabbitMQ 队列长度的扩缩容，支持 Scale-to-Zero
+*   [ ] **大视频分片上传**: S3 Multipart Upload 支持，断点续传
+*   [ ] **管道流处理**: 使用 io.Pipe 边下边转码，减少磁盘 I/O
 
 ---
 
