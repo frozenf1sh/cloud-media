@@ -136,6 +136,7 @@ type Transcoder interface {
 	// inputPath: 输入视频文件路径
 	// outputDir: 输出目录
 	// config: 转码配置
+	// videoInfo: 可选的预获取视频信息（如果为 nil 会自动获取）
 	// onProgress: 进度回调
 	// 返回: 输出信息，错误
 	Transcode(
@@ -143,10 +144,11 @@ type Transcoder interface {
 		inputPath string,
 		outputDir string,
 		config *TranscodeConfig,
+		videoInfo *VideoInfo,
 		onProgress TranscodeProgressCallback,
 	) (*OutputInfo, error)
 
-	// GetVideoInfo 获取视频信息
+	// GetVideoInfo 获取并验证视频信息
 	GetVideoInfo(ctx context.Context, inputPath string) (*VideoInfo, error)
 
 	// GenerateThumbnail 生成视频封面

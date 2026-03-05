@@ -74,7 +74,7 @@ services:
       - "3100:3100"
     volumes:
       # 映射配置文件
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - ./config/loki-config.yaml:/etc/loki/local-config.yaml
       # 持久化日志数据
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
@@ -91,7 +91,7 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock
       # 映射 Promtail 的配置文件
-      - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - ./config/promtail-config.yaml:/etc/promtail/config.yaml
     command: -config.file=/etc/promtail/config.yaml
     networks:
       - media-internal
@@ -105,7 +105,7 @@ services:
     user: root
     command: [ "-config.file=/etc/tempo.yaml" ]
     volumes:
-      - ./tempo-config.yaml:/etc/tempo.yaml
+      - ./config/tempo-config.yaml:/etc/tempo.yaml
       - tempo_data:/tmp/tempo
     ports:
       - "14268:14268"   # jaeger ingest
@@ -144,7 +144,7 @@ services:
       - "8080:8080"
       - "9091:9090"
     volumes:
-      - ./config.api-server.docker.yaml:/app/config.yaml
+      - ./config/config.api-server.docker.yaml:/app/config.yaml
     environment:
       - CLOUD_MEDIA_SERVER_HOST=0.0.0.0
       - CLOUD_MEDIA_SERVER_PORT=8080
@@ -172,7 +172,7 @@ services:
     ports:
       - "9092:9090"
     volumes:
-      - ./config.worker.docker.yaml:/app/config.yaml
+      - ./config/config.worker.docker.yaml:/app/config.yaml
     restart: always
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/health/live"]

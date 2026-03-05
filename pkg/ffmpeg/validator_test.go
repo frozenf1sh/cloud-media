@@ -17,51 +17,6 @@ func TestDefaultValidationConfig(t *testing.T) {
 	}
 }
 
-func TestIsVideoFile_FileNotFound(t *testing.T) {
-	result := IsVideoFile("/non/existent/file.mp4")
-	if result {
-		t.Error("Expected false for non-existent file")
-	}
-}
-
-func TestIsVideoFile_EmptyFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.mp4")
-
-	// 创建空文件
-	f, err := os.Create(tmpFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	result := IsVideoFile(tmpFile)
-	// 空文件可能返回 false 或 true（取决于实现），但不应 panic
-	_ = result
-}
-
-func TestIsVideoFile_MP4Magic(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.mp4")
-
-	// 创建带有 MP4 魔数的文件
-	f, err := os.Create(tmpFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
-	// 写入 MP4 魔数
-	_, err = f.Write([]byte("\x00\x00\x00\x18ftyp"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := IsVideoFile(tmpFile)
-	// 应该识别为视频文件
-	_ = result
-}
-
 func TestNewVideoValidator(t *testing.T) {
 	validator, err := NewDefaultVideoValidator()
 	if err != nil {
@@ -100,7 +55,7 @@ func TestVideoValidator_Validate_FileNotFound(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = validator.Validate(ctx, "/non/existent/file.mp4")
+	_, err = validator.ValidateAndGetInfo(ctx, "/non/existent/file.mp4")
 	if err == nil {
 		t.Error("Expected error for non-existent file")
 	}
@@ -115,7 +70,7 @@ func TestVideoValidator_Validate_Directory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	ctx := context.Background()
-	err = validator.Validate(ctx, tmpDir)
+	_, err = validator.ValidateAndGetInfo(ctx, tmpDir)
 	if err == nil {
 		t.Error("Expected error for directory")
 	}
@@ -145,38 +100,8 @@ func TestVideoValidator_Validate_SmallFile(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = validator.Validate(ctx, tmpFile)
+	_, err = validator.ValidateAndGetInfo(ctx, tmpFile)
 	if err == nil {
 		t.Error("Expected error for small file")
-	}
-}
-
-func TestVideoExtensions(t *testing.T) {
-	testCases := []struct {
-		ext  string
-		want bool
-	}{
-		{".mp4", true},
-		{".webm", true},
-		{".mkv", true},
-		{".avi", true},
-		{".mov", true},
-		{".flv", true},
-		{".wmv", true},
-		{".mts", true},
-		{".ts", true},
-		{".jpg", false},
-		{".png", false},
-		{".txt", false},
-		{".pdf", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.ext, func(t *testing.T) {
-			got := videoExtensions[tc.ext]
-			if got != tc.want {
-				t.Errorf("videoExtensions[%s] = %v, want %v", tc.ext, got, tc.want)
-			}
-		})
 	}
 }
