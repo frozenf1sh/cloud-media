@@ -6,16 +6,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config 应用配置
-type Config struct {
-	Server        ServerConfig        `mapstructure:"server"`
-	Log           LogConfig           `mapstructure:"log"`
-	Database      DatabaseConfig      `mapstructure:"database"`
-	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
-	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
-	Observability ObservabilityConfig `mapstructure:"observability"`
-}
-
 // ServerConfig HTTP 服务器配置
 type ServerConfig struct {
 	Host string `mapstructure:"host"`
@@ -82,6 +72,57 @@ type CDNConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	// URLSigningSecret CDN URL 签名密钥（可选）
 	URLSigningSecret string `mapstructure:"url_signing_secret"`
+}
+
+// TranscoderVariantConfig 转码变体配置
+type TranscoderVariantConfig struct {
+	// Name 变体名称，如 "1080p"
+	Name string `mapstructure:"name"`
+	// TargetSize 目标尺寸（横屏为高度，竖屏为宽度）
+	TargetSize int `mapstructure:"target_size"`
+	// Bitrate 视频码率，如 "4000k"
+	Bitrate string `mapstructure:"bitrate"`
+	// Bandwidth HLS 播放列表带宽（bps）
+	Bandwidth int `mapstructure:"bandwidth"`
+}
+
+// TranscoderConfig 转码器配置
+type TranscoderConfig struct {
+	// OutputBucket 输出存储桶
+	OutputBucket string `mapstructure:"output_bucket"`
+	// HLSTime HLS 分片时长（秒）
+	HLSTime int `mapstructure:"hls_time"`
+	// VideoCodec 视频编码器
+	VideoCodec string `mapstructure:"video_codec"`
+	// AudioCodec 音频编码器
+	AudioCodec string `mapstructure:"audio_codec"`
+	// AudioBitrate 音频码率
+	AudioBitrate string `mapstructure:"audio_bitrate"`
+	// Preset 编码预设（ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow）
+	Preset string `mapstructure:"preset"`
+	// GOPSize 关键帧间隔（帧数）
+	GOPSize int `mapstructure:"gop_size"`
+	// ThumbnailSize 封面最大尺寸
+	ThumbnailSize int `mapstructure:"thumbnail_size"`
+	// TimeoutMultiplier 超时倍数（视频时长 × 此倍数）
+	TimeoutMultiplier float64 `mapstructure:"timeout_multiplier"`
+	// MinTimeout 最小超时时间（分钟）
+	MinTimeout int `mapstructure:"min_timeout"`
+	// MaxTimeout 最大超时时间（分钟）
+	MaxTimeout int `mapstructure:"max_timeout"`
+	// Variants 多码率变体配置
+	Variants []TranscoderVariantConfig `mapstructure:"variants"`
+}
+
+// Config 应用配置
+type Config struct {
+	Server        ServerConfig        `mapstructure:"server"`
+	Log           LogConfig           `mapstructure:"log"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
+	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+	Transcoder    TranscoderConfig    `mapstructure:"transcoder"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
 // ObservabilityConfig 可观测性配置
@@ -196,6 +237,24 @@ func setDefaults(v *viper.Viper) {
 	// CDN 默认配置（禁用）
 	v.SetDefault("object_storage.cdn.enabled", false)
 	v.SetDefault("object_storage.cdn.base_url", "")
+
+	// 转码器默认配置
+	v.SetDefault("transcoder.output_bucket", "media-output")
+	v.SetDefault("transcoder.hls_time", 6)
+	v.SetDefault("transcoder.video_codec", "libx264")
+	v.SetDefault("transcoder.audio_codec", "aac")
+	v.SetDefault("transcoder.audio_bitrate", "128k")
+	v.SetDefault("transcoder.preset", "fast")
+	v.SetDefault("transcoder.gop_size", 48)
+	v.SetDefault("transcoder.thumbnail_size", 1080)
+	v.SetDefault("transcoder.timeout_multiplier", 3.0)
+	v.SetDefault("transcoder.min_timeout", 10)
+	v.SetDefault("transcoder.max_timeout", 120)
+	v.SetDefault("transcoder.variants", []map[string]any{
+		{"name": "1080p", "target_size": 1080, "bitrate": "4000k", "bandwidth": 4000000},
+		{"name": "720p", "target_size": 720, "bitrate": "2000k", "bandwidth": 2000000},
+		{"name": "480p", "target_size": 480, "bitrate": "1000k", "bandwidth": 1000000},
+	})
 
 	// 可观测性默认配置
 	v.SetDefault("observability.service_name", "cloud-media")

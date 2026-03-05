@@ -23,6 +23,7 @@ var workerProviderSet = wire.NewSet(
 	provideRabbitMQURL,
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
+	provideTranscoderConfig,
 )
 
 func InitializeWorker(cfg *config.Config) (*Worker, error) {
@@ -47,4 +48,8 @@ func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
 
 func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig {
 	return &cfg.ObjectStorage
+}
+
+func provideTranscoderConfig(cfg *config.Config) config.TranscoderConfig {
+	return cfg.Transcoder
 }
