@@ -32,7 +32,7 @@ func main() {
 	logger.Init(logger.Config{
 		Level:          cfg.Log.Level,
 		Format:         cfg.Log.Format,
-		ServiceName:    cfg.Observability.ServiceName + "-api",
+		ServiceName:    cfg.Observability.ServiceName,
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	logger.Info("Logger initialized",
@@ -44,7 +44,7 @@ func main() {
 	// 3. 初始化 OpenTelemetry
 	ctx := context.Background()
 	tracerProvider, err := telemetry.NewTracerProvider(ctx, telemetry.Config{
-		ServiceName:    cfg.Observability.ServiceName + "-api",
+		ServiceName:    cfg.Observability.ServiceName,
 		ServiceVersion: cfg.Observability.ServiceVersion,
 		Enabled:        cfg.Observability.Tracing.Enabled,
 		Exporter:       cfg.Observability.Tracing.Exporter,
