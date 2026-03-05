@@ -197,6 +197,9 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 	logger.InfoContext(ctx, "Task completed successfully",
 		logger.String("task_id", task.TaskID))
 	metrics.RecordTaskCompleted("success", time.Since(startTime))
+
+	// 设置 span 状态为成功
+	telemetry.SetSpanStatusOK(ctx)
 	return nil
 }
 
