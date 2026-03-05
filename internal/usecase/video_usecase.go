@@ -7,6 +7,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
+	"github.com/google/uuid"
 	"github.com/google/wire"
 )
 
@@ -29,6 +30,11 @@ func NewVideoUseCase(mq domain.MQBroker, repo domain.VideoTaskRepository) *Video
 
 // SubmitTranscodeTask 提交转码任务
 func (uc *VideoUseCase) SubmitTranscodeTask(ctx context.Context, taskID, sourceBucket, sourceKey string) (*domain.VideoTask, error) {
+	// 如果客户端没有提供 taskID，由服务端生成
+	if taskID == "" {
+		taskID = uuid.New().String()
+	}
+
 	ctx, span := telemetry.StartSpan(ctx, "VideoUseCase.SubmitTranscodeTask",
 		telemetry.String("task_id", taskID),
 		telemetry.String("source_bucket", sourceBucket),
@@ -62,7 +68,7 @@ func (uc *VideoUseCase) SubmitTranscodeTask(ctx context.Context, taskID, sourceB
 	task.Status = domain.TaskStatusQueued
 
 	// 4. 发布到消息队列
-	if err := uc.mq.PublishVideoTask(task); err != nil {
+	if err := uc.mq.PublishVideoTask(ctx, task); err != nil {
 		// 即使 MQ 发布失败，任务已经在数据库中，可以通过重试机制处理
 		// 这里不返回错误，而是记录日志
 		telemetry.RecordError(ctx, err)

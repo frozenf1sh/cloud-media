@@ -160,6 +160,17 @@ docker compose up -d
 
 > **Grafana 数据源配置**: 首次登录 Grafana 后，需手动添加 Loki (日志) 和 Tempo (追踪) 数据源。
 
+### 开发脚本
+
+项目提供了便捷脚本以简化开发流程：
+
+| 脚本 | 说明 |
+| :--- | :--- |
+| `./scripts/wiregen.sh` | 生成 Wire 依赖注入代码（api-server + worker） |
+| `./scripts/bufgen.sh` | 生成 Protobuf Connect RPC 代码 |
+| `./scripts/rebuild.sh` | 重新构建 Docker 镜像并重启服务 |
+| `./scripts/integration_test.sh` | 运行集成测试（服务检查 + 编译 + 单元测试） |
+
 ### 验证部署 (E2E Test)
 
 运行端到端测试以验证系统功能完整性：

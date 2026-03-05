@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/wire"
+	"go.opentelemetry.io/otel/trace"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -75,14 +75,7 @@ func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
 	}, nil
 }
 
-func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
-	ctx := context.Background()
-
-	// 如果任务有 TraceID，添加到 context 用于日志
-	if task.TraceID != "" {
-		ctx = telemetry.WithTraceID(ctx, task.TraceID)
-	}
-
+func (r *RabbitMQBroker) PublishVideoTask(ctx context.Context, task *domain.VideoTask) error {
 	body, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("failed to marshal task: %w", err)
@@ -92,6 +85,11 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 	headers := make(amqp.Table)
 	carrier := make(map[string]string)
 	telemetry.InjectToCarrier(ctx, carrier)
+
+	// 调试：记录注入的 carrier
+	logger.DebugContext(ctx, "Injecting trace context to AMQP headers",
+		logger.Any("carrier", carrier))
+
 	for k, v := range carrier {
 		headers[k] = v
 	}
@@ -122,7 +120,7 @@ func (r *RabbitMQBroker) PublishVideoTask(task *domain.VideoTask) error {
 
 // ConsumeTasks 开始消费任务
 func (r *RabbitMQBroker) ConsumeTasks(ctx context.Context, handler TaskHandler) error {
-	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
+	logger.InfoContext(ctx, "Started consuming tasks", logger.String("queue", r.queue.Name))
 
 	msgs, err := r.channel.Consume(
 		r.queue.Name,
@@ -137,22 +135,20 @@ func (r *RabbitMQBroker) ConsumeTasks(ctx context.Context, handler TaskHandler) 
 		return fmt.Errorf("failed to register consumer: %w", err)
 	}
 
-	log.InfoContext(ctx, "Started consuming tasks", logger.String("queue", r.queue.Name))
-
 	for {
 		select {
 		case <-ctx.Done():
-			log.InfoContext(ctx, "Stopping consumer...")
+			logger.InfoContext(ctx, "Stopping consumer...")
 			return ctx.Err()
 		case msg, ok := <-msgs:
 			if !ok {
-				log.ErrorContext(ctx, "Message channel closed")
+				logger.ErrorContext(ctx, "Message channel closed")
 				return fmt.Errorf("message channel closed")
 			}
 
 			// 处理消息
 			if err := r.handleMessage(ctx, msg, handler); err != nil {
-				log.ErrorContext(ctx, "Failed to handle message", logger.Err(err))
+				logger.ErrorContext(ctx, "Failed to handle message", logger.Err(err))
 			}
 		}
 	}
@@ -175,20 +171,36 @@ func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, h
 			carrier[k] = s
 		}
 	}
+
+	// 调试：记录提取的 carrier
+	logger.DebugContext(ctx, "Extracted trace context from AMQP headers",
+		logger.Any("carrier", carrier),
+		logger.String("task_id", task.TaskID))
+
 	ctx = telemetry.ExtractFromCarrier(ctx, carrier)
 
-	// 使用任务中的 TraceID，如果没有则用 TaskID 作为 fallback
-	traceID := task.TraceID
-	if traceID == "" {
-		traceID = task.TaskID
-		ctx = telemetry.WithTraceID(ctx, traceID)
-	}
+	// 调试：记录提取后的 span context
+	sc := trace.SpanFromContext(ctx).SpanContext()
+	logger.DebugContext(ctx, "Span context after extract",
+		logger.String("trace_id", sc.TraceID().String()),
+		logger.String("span_id", sc.SpanID().String()),
+		logger.Bool("is_valid", sc.IsValid()),
+		logger.String("task_id", task.TaskID))
 
-	log := slog.With(
-		logger.String("trace_id", traceID),
-		logger.String("task_id", task.TaskID),
-	)
-	log.InfoContext(ctx, "Received task")
+	// 只有在没有有效的 trace context 时，才使用 task.TraceID 或 task.TaskID 作为 fallback
+	if !sc.IsValid() {
+		logger.DebugContext(ctx, "No valid span context, using fallback",
+			logger.String("task_trace_id", task.TraceID),
+			logger.String("task_id", task.TaskID))
+
+		traceID := task.TraceID
+		if traceID == "" {
+			traceID = task.TaskID
+		}
+		if traceID != "" {
+			ctx = telemetry.WithTraceID(ctx, traceID)
+		}
+	}
 
 	// 开始处理 span
 	ctx, span := telemetry.StartSpan(ctx, "RabbitMQBroker.handleMessage",
@@ -196,10 +208,22 @@ func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, h
 	)
 	defer span.End()
 
+	// 调试：确认 span 创建成功
+	sc = trace.SpanFromContext(ctx).SpanContext()
+	logger.DebugContext(ctx, "Created span for handling message",
+		logger.String("trace_id", sc.TraceID().String()),
+		logger.String("span_id", sc.SpanID().String()),
+		logger.String("task_id", task.TaskID))
+
+	logger.InfoContext(ctx, "Received task",
+		logger.String("task_id", task.TaskID))
+
 	// 调用 handler 处理任务
 	if err := handler(ctx, &task); err != nil {
 		telemetry.RecordError(ctx, err)
-		log.ErrorContext(ctx, "Task handling failed", logger.Err(err))
+		logger.ErrorContext(ctx, "Task handling failed",
+			logger.Err(err),
+			logger.String("task_id", task.TaskID))
 		// 处理失败，不重新入队（已更新数据库状态）
 		_ = msg.Nack(false, false)
 		return err
@@ -207,10 +231,13 @@ func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, h
 
 	// 确认消息
 	if err := msg.Ack(false); err != nil {
-		log.WarnContext(ctx, "Failed to ack message", logger.Err(err))
+		logger.WarnContext(ctx, "Failed to ack message",
+			logger.Err(err),
+			logger.String("task_id", task.TaskID))
 	}
 
-	log.InfoContext(ctx, "Task completed and acknowledged")
+	logger.InfoContext(ctx, "Task completed and acknowledged",
+		logger.String("task_id", task.TaskID))
 	return nil
 }
 

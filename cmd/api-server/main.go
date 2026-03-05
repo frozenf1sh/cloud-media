@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,10 +17,11 @@ import (
 )
 
 func main() {
+	logger.InitSimple("info")
 	// 1. 加载配置
 	cfg, err := config.Load("")
 	if err != nil {
-		slog.Error("Failed to load config, using defaults", "error", err)
+		logger.Error("Failed to load config, using defaults", "error", err)
 		cfg = config.Default()
 	}
 
@@ -32,7 +32,7 @@ func main() {
 	logger.Init(logger.Config{
 		Level:          cfg.Log.Level,
 		Format:         cfg.Log.Format,
-		ServiceName:    cfg.Observability.ServiceName,
+		ServiceName:    cfg.Observability.ServiceName + "-api",
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	logger.Info("Logger initialized",
