@@ -26,7 +26,10 @@ func NewVideoServer(uc *usecase.VideoUseCase) *VideoServer {
 }
 
 // toConnectError 将应用错误转换为 Connect RPC 错误
-func toConnectError(_ context.Context, err error) *connect.Error {
+func toConnectError(ctx context.Context, err error) *connect.Error {
+	// 记录错误到 span
+	telemetry.RecordError(ctx, err)
+
 	if appErr, ok := errors.IsAppError(err); ok {
 		var code connect.Code
 		switch appErr.Code {
