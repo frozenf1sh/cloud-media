@@ -1,4 +1,5 @@
 # Cloud Media API Server Docker 环境配置
+
 server:
   host: 0.0.0.0
   port: 8080
@@ -30,6 +31,22 @@ object_storage:
   cdn:
     enabled: false
     base_url: ""
+
+# ============================================
+# Cloudflare R2 配置示例（取消注释使用）
+# ============================================
+# object_storage:
+#   type: r2
+#   internal_endpoint: <account_id>.r2.cloudflarestorage.com
+#   internal_use_ssl: true
+#   external_endpoint: <account_id>.r2.cloudflarestorage.com
+#   external_use_ssl: true
+#   access_key_id: <your_access_key_id>
+#   secret_access_key: <your_secret_access_key>
+#   region: auto
+#   cdn:
+#     enabled: true
+#     base_url: "https://media.yourdomain.com"
 
 observability:
   service_name: cloud-media-api-server

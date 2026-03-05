@@ -38,6 +38,23 @@ object_storage:
     base_url: "https://cdn.example.com"
     # url_signing_secret: ""  # 用于 CDN URL 签名（可选）
 
+# ============================================
+# Cloudflare R2 配置示例（取消注释使用）
+# ============================================
+# object_storage:
+#   type: r2
+#   # R2 Endpoint 格式: https://<account_id>.r2.cloudflarestorage.com
+#   internal_endpoint: <account_id>.r2.cloudflarestorage.com
+#   internal_use_ssl: true
+#   external_endpoint: <account_id>.r2.cloudflarestorage.com
+#   external_use_ssl: true
+#   access_key_id: <your_access_key_id>
+#   secret_access_key: <your_secret_access_key>
+#   region: auto  # R2 固定使用 "auto"
+#   cdn:
+#     enabled: true
+#     base_url: "https://media.yourdomain.com"
+
 # 兼容性配置（保留旧格式，会被 object_storage 覆盖）
 minio:
   internal_endpoint: localhost:9000

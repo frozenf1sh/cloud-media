@@ -1,4 +1,5 @@
 # Cloud Media Worker Docker 环境配置
+
 server:
   host: 0.0.0.0
   port: 9090
@@ -30,6 +31,49 @@ object_storage:
   cdn:
     enabled: false
     base_url: ""
+
+# ============================================
+# Cloudflare R2 配置示例（取消注释使用）
+# ============================================
+# object_storage:
+#   type: r2
+#   internal_endpoint: <account_id>.r2.cloudflarestorage.com
+#   internal_use_ssl: true
+#   external_endpoint: <account_id>.r2.cloudflarestorage.com
+#   external_use_ssl: true
+#   access_key_id: <your_access_key_id>
+#   secret_access_key: <your_secret_access_key>
+#   region: auto
+#   cdn:
+#     enabled: true
+#     base_url: "https://media.yourdomain.com"
+
+# 转码器配置
+transcoder:
+  output_bucket: "media-output"
+  hls_time: 6
+  video_codec: "libx264"
+  audio_codec: "aac"
+  audio_bitrate: "128k"
+  preset: "fast"
+  gop_size: 48
+  thumbnail_size: 1080
+  timeout_multiplier: 3.0
+  min_timeout: 10
+  max_timeout: 120
+  variants:
+    - name: "1080p"
+      target_size: 1080
+      bitrate: "4000k"
+      bandwidth: 4000000
+    - name: "720p"
+      target_size: 720
+      bitrate: "2000k"
+      bandwidth: 2000000
+    - name: "480p"
+      target_size: 480
+      bitrate: "1000k"
+      bandwidth: 1000000
 
 observability:
   service_name: cloud-media-worker
