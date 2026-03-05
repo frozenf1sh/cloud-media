@@ -16,7 +16,10 @@ import (
 )
 
 func main() {
-	// 1. 加载配置
+	// 1. 先初始化一个简单日志（用于启动阶段）
+	logger.InitSimple("info")
+
+	// 2. 加载配置
 	cfg, err := config.Load("")
 	if err != nil {
 		logger.Error("Failed to load config, using defaults", logger.Err(err))
@@ -26,11 +29,11 @@ func main() {
 	// 迁移旧版配置（向后兼容）
 	cfg.MigrateLegacyConfig()
 
-	// 2. 初始化日志
+	// 3. 重新初始化日志（用完整配置）
 	logger.Init(logger.Config{
 		Level:          cfg.Log.Level,
 		Format:         cfg.Log.Format,
-		ServiceName:    cfg.Observability.ServiceName,
+		ServiceName:    cfg.Observability.ServiceName + "-worker",
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	logger.Info("Logger initialized",

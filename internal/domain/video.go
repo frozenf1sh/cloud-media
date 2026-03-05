@@ -106,7 +106,7 @@ type VideoTaskRepository interface {
 
 // MQBroker 消息队列接口
 type MQBroker interface {
-	PublishVideoTask(task *VideoTask) error
+	PublishVideoTask(ctx context.Context, task *VideoTask) error
 }
 
 // ObjectStorage 对象存储接口 - 支持 MinIO、S3、阿里云 OSS 等

@@ -35,7 +35,7 @@ func (s *VideoServer) SubmitTask(
 	}
 
 	return connect.NewResponse(&pb.SubmitTaskResponse{
-		TaskId:  req.Msg.TaskId,
+		TaskId:  task.TaskID,
 		Status:  string(task.Status),
 		Message: "Task submitted successfully!",
 	}), nil

@@ -303,7 +303,7 @@ func uploadToMinIO(ctx context.Context, log *slog.Logger, client *minio.Client, 
 // submitTask 提交转码任务
 func submitTask(ctx context.Context, log *slog.Logger, testCfg *TestConfig, bucket, key string) error {
 	req := connect.NewRequest(&pb.SubmitTaskRequest{
-		TaskId:       testCfg.taskID,
+		TaskId:       testCfg.taskID, // 可选，如果为空则服务端生成
 		SourceBucket: bucket,
 		SourceKey:    key,
 	})
@@ -311,6 +311,14 @@ func submitTask(ctx context.Context, log *slog.Logger, testCfg *TestConfig, buck
 	resp, err := testCfg.videoClient.SubmitTask(ctx, req)
 	if err != nil {
 		return fmt.Errorf("SubmitTask failed: %w", err)
+	}
+
+	// 如果服务端返回了新的 taskID，更新我们的 taskID
+	if resp.Msg.TaskId != "" && resp.Msg.TaskId != testCfg.taskID {
+		log.Info("Server generated task ID",
+			"client_task_id", testCfg.taskID,
+			"server_task_id", resp.Msg.TaskId)
+		testCfg.taskID = resp.Msg.TaskId
 	}
 
 	log.Info("SubmitTask response",

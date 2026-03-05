@@ -6,7 +6,7 @@ server:
   port: 8080
 
 log:
-  level: info  # debug, info, warn, error
+  level: debug  # debug, info, warn, error
   format: json
 
 database:
