@@ -8,8 +8,12 @@ import (
 
 // ValidationConfig 验证配置
 type ValidationConfig struct {
-	MinFileSize int64 // 最小文件大小（字节），默认 100 字节
-	MaxFileSize int64 // 最大文件大小（字节），默认 10GB
+	MinFileSize    int64   // 最小文件大小（字节），默认 100 字节
+	MaxFileSize    int64   // 最大文件大小（字节），默认 10GB
+	MinDuration    float64 // 最小视频时长（秒），默认 0（不限制）
+	MaxDuration    float64 // 最大视频时长（秒），默认 86400（24小时）
+	MinAspectRatio float64 // 最小宽高比，默认 1/16
+	MaxAspectRatio float64 // 最大宽高比，默认 16/1
 }
 
 // ValidationResult 验证结果，包含验证通过的视频信息
@@ -21,8 +25,12 @@ type ValidationResult struct {
 // DefaultValidationConfig 默认验证配置
 func DefaultValidationConfig() ValidationConfig {
 	return ValidationConfig{
-		MinFileSize: 100,
-		MaxFileSize: 10 * 1024 * 1024 * 1024, // 10GB
+		MinFileSize:    100,
+		MaxFileSize:    10 * 1024 * 1024 * 1024, // 10GB
+		MinDuration:    0,                                // 不限制最小时长
+		MaxDuration:    24 * 60 * 60,                    // 24小时
+		MinAspectRatio: 1.0 / 16.0,                       // 1:16
+		MaxAspectRatio: 16.0 / 1.0,                       // 16:1
 	}
 }
 
@@ -84,6 +92,23 @@ func (v *VideoValidator) ValidateAndGetInfo(ctx context.Context, filePath string
 	// 5. 确保有有效的视频流
 	if videoInfo.Width == 0 || videoInfo.Height == 0 {
 		return nil, fmt.Errorf("video has no valid video stream")
+	}
+
+	// 6. 验证视频时长
+	if v.config.MinDuration > 0 && videoInfo.Duration < v.config.MinDuration {
+		return nil, fmt.Errorf("video too short (%.2fs, min %.2fs)", videoInfo.Duration, v.config.MinDuration)
+	}
+	if v.config.MaxDuration > 0 && videoInfo.Duration > v.config.MaxDuration {
+		return nil, fmt.Errorf("video too long (%.2fs, max %.2fs)", videoInfo.Duration, v.config.MaxDuration)
+	}
+
+	// 7. 验证宽高比
+	aspectRatio := float64(videoInfo.Width) / float64(videoInfo.Height)
+	if aspectRatio < v.config.MinAspectRatio {
+		return nil, fmt.Errorf("video aspect ratio too small (%.2f, min %.2f)", aspectRatio, v.config.MinAspectRatio)
+	}
+	if aspectRatio > v.config.MaxAspectRatio {
+		return nil, fmt.Errorf("video aspect ratio too large (%.2f, max %.2f)", aspectRatio, v.config.MaxAspectRatio)
 	}
 
 	return videoInfo, nil

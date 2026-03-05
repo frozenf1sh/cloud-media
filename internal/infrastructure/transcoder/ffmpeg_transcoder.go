@@ -33,10 +33,7 @@ type variantConfig struct {
 // FFmpegTranscoder FFmpeg 转码器实现
 type FFmpegTranscoder struct {
 	ffmpeg          *ffmpeg.FFmpeg
-	ffprobe         *ffmpeg.FFprobe
-	videoInfoParser *ffmpeg.VideoInfoParser
 	scaleCalculator *ffmpeg.ScaleCalculator
-	aspectValidator *ffmpeg.AspectRatioValidator
 	progressParser  *ffmpeg.ProgressParser
 	videoValidator  *ffmpeg.VideoValidator
 }
@@ -48,11 +45,6 @@ func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
 		return nil, err
 	}
 
-	fp, err := ffmpeg.NewFFprobe()
-	if err != nil {
-		return nil, err
-	}
-
 	vv, err := ffmpeg.NewDefaultVideoValidator()
 	if err != nil {
 		return nil, err
@@ -60,10 +52,7 @@ func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
 
 	return &FFmpegTranscoder{
 		ffmpeg:          f,
-		ffprobe:         fp,
-		videoInfoParser: ffmpeg.NewVideoInfoParser(fp),
 		scaleCalculator: ffmpeg.NewScaleCalculator(),
-		aspectValidator: ffmpeg.NewDefaultAspectRatioValidator(),
 		progressParser:  ffmpeg.NewProgressParser(),
 		videoValidator:  vv,
 	}, nil
@@ -91,12 +80,6 @@ func (t *FFmpegTranscoder) Transcode(
 			telemetry.RecordError(ctx, err)
 			return nil, err
 		}
-	}
-
-	// 验证宽高比
-	if err := t.aspectValidator.Validate(videoInfo.Width, videoInfo.Height); err != nil {
-		telemetry.RecordError(ctx, err)
-		return nil, err
 	}
 
 	// 创建输出目录
