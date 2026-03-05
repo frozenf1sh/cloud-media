@@ -33,7 +33,7 @@ func main() {
 	logger.Init(logger.Config{
 		Level:          cfg.Log.Level,
 		Format:         cfg.Log.Format,
-		ServiceName:    cfg.Observability.ServiceName + "-worker",
+		ServiceName:    cfg.Observability.ServiceName,
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	logger.Info("Logger initialized",
@@ -45,7 +45,7 @@ func main() {
 	// 3. 初始化 OpenTelemetry
 	ctx := context.Background()
 	tracerProvider, err := telemetry.NewTracerProvider(ctx, telemetry.Config{
-		ServiceName:    cfg.Observability.ServiceName + "-worker",
+		ServiceName:    cfg.Observability.ServiceName,
 		ServiceVersion: cfg.Observability.ServiceVersion,
 		Enabled:        cfg.Observability.Tracing.Enabled,
 		Exporter:       cfg.Observability.Tracing.Exporter,
@@ -78,21 +78,25 @@ func main() {
 		panic(err)
 	}
 
-	// 6. 启动 metrics 和健康检查 HTTP 服务器（如果启用）
-	if cfg.Observability.Metrics.Enabled {
-		go func() {
-			mux := http.NewServeMux()
+	// 6. 启动健康检查和 metrics HTTP 服务器
+	go func() {
+		mux := http.NewServeMux()
+		// 健康检查端点总是可用
+		mux.Handle("/health/live", health.LivenessHandler())
+		mux.Handle("/health/ready", worker.HealthChecker().HTTPHandler())
+		// Metrics 端点根据配置启用
+		if cfg.Observability.Metrics.Enabled {
 			mux.Handle(cfg.Observability.Metrics.Path, metrics.HTTPHandler())
-			mux.Handle("/health/live", health.LivenessHandler())
-			mux.Handle("/health/ready", worker.HealthChecker().HTTPHandler())
+			logger.Info("Metrics endpoint enabled", logger.String("path", cfg.Observability.Metrics.Path))
+		}
 
-			addr := cfg.Observability.Metrics.Address()
-			logger.Info("Worker metrics/health server starting", logger.String("addr", addr))
-			if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
-				logger.Error("Worker metrics server failed", logger.Err(err))
-			}
-		}()
-	}
+		// Worker 使用 server.port 配置作为健康检查和 metrics 端口
+		addr := cfg.Server.Address()
+		logger.Info("Worker health/metrics server starting", logger.String("addr", addr))
+		if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
+			logger.Error("Worker health/metrics server failed", logger.Err(err))
+		}
+	}()
 
 	// 7. 启动 worker
 	logger.Info("Worker starting...")
