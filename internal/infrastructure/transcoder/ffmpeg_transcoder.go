@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
+	"github.com/frozenf1sh/cloud-media/pkg/config"
 	"github.com/frozenf1sh/cloud-media/pkg/ffmpeg"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/metrics"
@@ -22,24 +24,17 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.Transcoder), new(*FFmpegTranscoder)),
 )
 
-// variantConfig 变体配置
-type variantConfig struct {
-	name       string // 变体名称，如 "1080p"
-	targetSize int    // 目标尺寸（横屏为高度，竖屏为宽度）
-	bitrate    string
-	bandwidth  int
-}
-
 // FFmpegTranscoder FFmpeg 转码器实现
 type FFmpegTranscoder struct {
 	ffmpeg          *ffmpeg.FFmpeg
 	scaleCalculator *ffmpeg.ScaleCalculator
 	progressParser  *ffmpeg.ProgressParser
 	videoValidator  *ffmpeg.VideoValidator
+	cfg             config.TranscoderConfig
 }
 
 // NewFFmpegTranscoder 创建 FFmpeg 转码器
-func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
+func NewFFmpegTranscoder(cfg config.TranscoderConfig) (*FFmpegTranscoder, error) {
 	f, err := ffmpeg.NewFFmpeg()
 	if err != nil {
 		return nil, err
@@ -55,6 +50,7 @@ func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
 		scaleCalculator: ffmpeg.NewScaleCalculator(),
 		progressParser:  ffmpeg.NewProgressParser(),
 		videoValidator:  vv,
+		cfg:             cfg,
 	}, nil
 }
 
@@ -88,19 +84,11 @@ func (t *FFmpegTranscoder) Transcode(
 		return nil, fmt.Errorf("failed to create output dir: %w", err)
 	}
 
-	// 定义多码率变体（目标高度/宽度）
-	variantConfigs := []variantConfig{
-		{"1080p", 1080, "4000k", 4000000},
-		{"720p", 720, "2000k", 2000000},
-		{"480p", 480, "1000k", 1000000},
-	}
-
 	outputBasePath := filepath.Base(outputDir)
-	outputBucket := "media-output" // TODO: 从配置获取
 	outputInfo := &domain.OutputInfo{
 		OutputBasePath: outputBasePath,
-		OutputBucket:   outputBucket,
-		Variants:       make([]domain.VariantOutput, 0, len(variantConfigs)),
+		OutputBucket:   t.cfg.OutputBucket,
+		Variants:       make([]domain.VariantOutput, 0, len(t.cfg.Variants)),
 	}
 
 	// 判断是否是竖屏视频
@@ -116,13 +104,20 @@ func (t *FFmpegTranscoder) Transcode(
 		telemetry.RecordError(ctx, err)
 	}
 
+	// 计算进度权重
+	numVariants := len(t.cfg.Variants)
+	if numVariants == 0 {
+		return nil, fmt.Errorf("no transcoding variants configured")
+	}
+	variantProgressWeight := 90 / numVariants // 封面占 10%，变体共享 90%
+
 	// 转码每个变体
-	for i, variant := range variantConfigs {
+	for i, variant := range t.cfg.Variants {
 		// 计算保持宽高比的分辨率
-		scaleWidth, scaleHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, variant.targetSize)
+		scaleWidth, scaleHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, variant.TargetSize)
 		resolutionStr := fmt.Sprintf("%dx%d", scaleWidth, scaleHeight)
 
-		variantDir := filepath.Join(outputDir, variant.name)
+		variantDir := filepath.Join(outputDir, variant.Name)
 		if err := os.MkdirAll(variantDir, 0755); err != nil {
 			telemetry.RecordError(ctx, err)
 			return nil, fmt.Errorf("failed to create variant dir: %w", err)
@@ -131,40 +126,40 @@ func (t *FFmpegTranscoder) Transcode(
 		playlistPath := filepath.Join(variantDir, "index.m3u8")
 		segmentPattern := filepath.Join(variantDir, "segment_%04d.ts")
 
-		// 计算进度权重（每个变体占 30%，封面占 10%）
-		progressOffset := 10 + i*30
+		// 计算进度
+		progressOffset := 10 + i*variantProgressWeight
 		variantCallback := func(progress int, message string) {
 			if onProgress != nil {
-				totalProgress := progressOffset + (progress * 30 / 100)
+				totalProgress := progressOffset + (progress * variantProgressWeight / 100)
 				onProgress(totalProgress, message)
 			}
 		}
 
 		// 执行转码
-		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.bitrate, videoInfo, variantCallback); err != nil {
+		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.Bitrate, videoInfo, variantCallback); err != nil {
 			telemetry.RecordError(ctx, err)
-			return nil, fmt.Errorf("failed to transcode %s: %w", variant.name, err)
+			return nil, fmt.Errorf("failed to transcode %s: %w", variant.Name, err)
 		}
 
-		metrics.RecordTranscodedVideo(variant.name)
+		metrics.RecordTranscodedVideo(variant.Name)
 
 		// 记录变体信息
 		variantResolution := resolutionStr
 		if isPortrait {
-			variantResolution = fmt.Sprintf("%dp (portrait)", variant.targetSize)
+			variantResolution = fmt.Sprintf("%dp (portrait)", variant.TargetSize)
 		} else {
-			variantResolution = fmt.Sprintf("%dp", variant.targetSize)
+			variantResolution = fmt.Sprintf("%dp", variant.TargetSize)
 		}
 		outputInfo.Variants = append(outputInfo.Variants, domain.VariantOutput{
 			Resolution:   variantResolution,
-			PlaylistPath: filepath.Join(outputBasePath, variant.name, "index.m3u8"),
-			Bandwidth:    variant.bandwidth,
+			PlaylistPath: filepath.Join(outputBasePath, variant.Name, "index.m3u8"),
+			Bandwidth:    variant.Bandwidth,
 		})
 	}
 
 	// 生成主播放列表
 	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
-	if err := t.generateMasterPlaylist(masterPlaylistPath, outputInfo.Variants, variantConfigs, videoInfo); err != nil {
+	if err := t.generateMasterPlaylist(masterPlaylistPath, outputInfo.Variants, videoInfo); err != nil {
 		telemetry.RecordError(ctx, err)
 		return nil, fmt.Errorf("failed to generate master playlist: %w", err)
 	}
@@ -201,27 +196,40 @@ func (t *FFmpegTranscoder) transcodeVariant(
 
 	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
+	// 计算超时时间
+	timeout := time.Duration(videoInfo.Duration*t.cfg.TimeoutMultiplier) * time.Second
+	if timeout < time.Duration(t.cfg.MinTimeout)*time.Minute {
+		timeout = time.Duration(t.cfg.MinTimeout) * time.Minute
+	}
+	if timeout > time.Duration(t.cfg.MaxTimeout)*time.Minute {
+		timeout = time.Duration(t.cfg.MaxTimeout) * time.Minute
+	}
+
+	// 创建带超时的 context
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	scaleFilter := t.scaleCalculator.ScaleFilter(width, height)
 
 	args := []string{
 		"-y",
 		"-i", inputPath,
 		"-vf", scaleFilter,
-		"-c:v", "libx264",
+		"-c:v", t.cfg.VideoCodec,
 		"-b:v", bitrate,
-		"-preset", "fast",
-		"-g", "48",
+		"-preset", t.cfg.Preset,
+		"-g", fmt.Sprintf("%d", t.cfg.GOPSize),
 		"-sc_threshold", "0",
-		"-c:a", "aac",
-		"-b:a", "128k",
+		"-c:a", t.cfg.AudioCodec,
+		"-b:a", t.cfg.AudioBitrate,
 		"-f", "hls",
-		"-hls_time", "6",
+		"-hls_time", fmt.Sprintf("%d", t.cfg.HLSTime),
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
 		playlistPath,
 	}
 
-	cmd := t.ffmpeg.Command(ctx, args...)
+	cmd := t.ffmpeg.Command(timeoutCtx, args...)
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -238,6 +246,10 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	go t.progressParser.Parse(stderr, videoInfo.Duration, ffmpeg.ProgressCallback(onProgress))
 
 	if err := cmd.Wait(); err != nil {
+		// 检查是否是超时导致的
+		if timeoutCtx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("transcoding timed out after %v", timeout)
+		}
 		telemetry.RecordError(ctx, err)
 		return fmt.Errorf("ffmpeg failed: %w", err)
 	}
@@ -250,7 +262,7 @@ func (t *FFmpegTranscoder) transcodeVariant(
 }
 
 // generateMasterPlaylist 生成 HLS 主播放列表
-func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain.VariantOutput, variantConfigs []variantConfig, videoInfo *domain.VideoInfo) error {
+func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain.VariantOutput, videoInfo *domain.VideoInfo) error {
 	var sb strings.Builder
 
 	sb.WriteString("#EXTM3U\n")
@@ -258,13 +270,13 @@ func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain
 
 	for i, variant := range variants {
 		// 计算该变体的实际分辨率
-		width, height := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, variantConfigs[i].targetSize)
+		width, height := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, t.cfg.Variants[i].TargetSize)
 		sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n",
 			variant.Bandwidth, width, height))
-		sb.WriteString(fmt.Sprintf("%s/index.m3u8\n", variantConfigs[i].name))
+		sb.WriteString(fmt.Sprintf("%s/index.m3u8\n", t.cfg.Variants[i].Name))
 	}
 
-	return os.WriteFile(path, []byte(sb.String()), 0644)
+	return os.WriteFile(path, []byte(sb.String()), 064)
 }
 
 // GetVideoInfo 获取并验证视频信息
@@ -300,9 +312,8 @@ func (t *FFmpegTranscoder) GenerateThumbnail(ctx context.Context, inputPath stri
 	var args []string
 
 	if videoInfo != nil && videoInfo.Width > 0 && videoInfo.Height > 0 {
-		// 计算封面缩放后的尺寸（最大边不超过 1080）
-		targetSize := 1080
-		thumbWidth, thumbHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, targetSize)
+		// 计算封面缩放后的尺寸
+		thumbWidth, thumbHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, t.cfg.ThumbnailSize)
 		scaleFilter := t.scaleCalculator.ScaleFilter(thumbWidth, thumbHeight)
 
 		args = []string{

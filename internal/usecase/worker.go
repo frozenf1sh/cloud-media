@@ -52,9 +52,37 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 	startTime := time.Now()
 
 	logger.InfoContext(ctx, "Starting to process task",
-		logger.String("task_id", task.TaskID))
+		logger.String("task_id", task.TaskID),
+		logger.String("current_status", string(task.Status)))
 
-	// 更新任务状态为 processing
+	// 1. 幂等性检查：从数据库重新加载任务，检查当前状态
+	currentTask, err := uc.repository.GetByTaskID(ctx, task.TaskID)
+	if err != nil {
+		telemetry.RecordError(ctx, err)
+		metrics.RecordTaskCompleted("failed", time.Since(startTime))
+		return fmt.Errorf("failed to fetch task for idempotency check: %w", err)
+	}
+
+	// 2. 检查任务是否已经处于终态（幂等性保障）
+	if currentTask.Status == domain.TaskStatusSuccess ||
+		currentTask.Status == domain.TaskStatusFailed ||
+		currentTask.Status == domain.TaskStatusCancelled {
+		logger.InfoContext(ctx, "Task already in terminal state, skipping processing",
+			logger.String("task_id", task.TaskID),
+			logger.String("status", string(currentTask.Status)))
+		telemetry.SetSpanStatusOK(ctx)
+		return nil
+	}
+
+	// 3. 检查任务是否已经在处理中（防止并发处理）
+	if currentTask.Status == domain.TaskStatusProcessing {
+		logger.WarnContext(ctx, "Task already being processed, skipping",
+			logger.String("task_id", task.TaskID))
+		telemetry.SetSpanStatusOK(ctx)
+		return nil
+	}
+
+	// 4. 更新任务状态为 processing
 	now := time.Now().Unix()
 	task.Status = domain.TaskStatusProcessing
 	task.StartedAt = &now
