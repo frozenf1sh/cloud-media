@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
@@ -190,10 +191,23 @@ func SetAttributes(ctx context.Context, attrs ...attribute.KeyValue) {
 	span.SetAttributes(attrs...)
 }
 
-// RecordError 向当前 span 记录错误
+// RecordError 向当前 span 记录错误并设置 span 状态为 Error
 func RecordError(ctx context.Context, err error, attrs ...attribute.KeyValue) {
 	span := trace.SpanFromContext(ctx)
 	span.RecordError(err, trace.WithAttributes(attrs...))
+	span.SetStatus(codes.Error, err.Error())
+}
+
+// SetSpanStatusOK 设置当前 span 状态为 OK
+func SetSpanStatusOK(ctx context.Context) {
+	span := trace.SpanFromContext(ctx)
+	span.SetStatus(codes.Ok, "")
+}
+
+// SetSpanStatusError 手动设置当前 span 状态为 Error（不调用 RecordError）
+func SetSpanStatusError(ctx context.Context, description string) {
+	span := trace.SpanFromContext(ctx)
+	span.SetStatus(codes.Error, description)
 }
 
 // String 创建字符串属性

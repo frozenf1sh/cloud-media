@@ -38,6 +38,7 @@ type FFmpegTranscoder struct {
 	scaleCalculator *ffmpeg.ScaleCalculator
 	aspectValidator *ffmpeg.AspectRatioValidator
 	progressParser  *ffmpeg.ProgressParser
+	videoValidator  *ffmpeg.VideoValidator
 }
 
 // NewFFmpegTranscoder 创建 FFmpeg 转码器
@@ -52,6 +53,11 @@ func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
 		return nil, err
 	}
 
+	vv, err := ffmpeg.NewDefaultVideoValidator()
+	if err != nil {
+		return nil, err
+	}
+
 	return &FFmpegTranscoder{
 		ffmpeg:          f,
 		ffprobe:         fp,
@@ -59,6 +65,7 @@ func NewFFmpegTranscoder() (*FFmpegTranscoder, error) {
 		scaleCalculator: ffmpeg.NewScaleCalculator(),
 		aspectValidator: ffmpeg.NewDefaultAspectRatioValidator(),
 		progressParser:  ffmpeg.NewProgressParser(),
+		videoValidator:  vv,
 	}, nil
 }
 
@@ -75,13 +82,19 @@ func (t *FFmpegTranscoder) Transcode(
 
 	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
-	// 创建输出目录
+	// 1. 验证输入文件
+	if err := t.videoValidator.Validate(ctx, inputPath); err != nil {
+		telemetry.RecordError(ctx, err)
+		return nil, fmt.Errorf("invalid video file: %w", err)
+	}
+
+	// 2. 创建输出目录
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		telemetry.RecordError(ctx, err)
 		return nil, fmt.Errorf("failed to create output dir: %w", err)
 	}
 
-	// 获取视频信息
+	// 3. 获取视频信息
 	videoInfo, err := t.GetVideoInfo(ctx, inputPath)
 	if err != nil {
 		log.WarnContext(ctx, "Failed to get video info, using defaults", logger.Err(err))
@@ -89,7 +102,7 @@ func (t *FFmpegTranscoder) Transcode(
 		videoInfo = &domain.VideoInfo{Duration: 0}
 	}
 
-	// 验证宽高比
+	// 4. 验证宽高比
 	if err := t.aspectValidator.Validate(videoInfo.Width, videoInfo.Height); err != nil {
 		telemetry.RecordError(ctx, err)
 		return nil, err
@@ -181,6 +194,9 @@ func (t *FFmpegTranscoder) Transcode(
 	if onProgress != nil {
 		onProgress(100, "Transcoding completed")
 	}
+
+	// 设置 span 状态为成功
+	telemetry.SetSpanStatusOK(ctx)
 
 	return outputInfo, nil
 }
