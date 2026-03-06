@@ -60,7 +60,26 @@ func main() {
 		}
 	}()
 
-	// 4. 使用 Wire 生成的依赖注入函数
+	// 4. 初始化 Metrics Provider
+	metricsProvider, err := metrics.NewMetricsProvider(ctx, metrics.Config{
+		ServiceName:    cfg.Observability.ServiceName,
+		ServiceVersion: cfg.Observability.ServiceVersion,
+		Enabled:        cfg.Observability.Metrics.Enabled,
+		Exporter:       cfg.Observability.Metrics.Exporter,
+		OTLPEndpoint:   cfg.Observability.Metrics.OTLPEndpoint,
+	})
+	if err != nil {
+		logger.Warn("Failed to initialize metrics provider, skipping metrics", logger.Err(err))
+	}
+	defer func() {
+		if metricsProvider != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = metricsProvider.Shutdown(shutdownCtx)
+		}
+	}()
+
+	// 5. 使用 Wire 生成的依赖注入函数
 	server, err := InitializeVideoServer(cfg)
 	if err != nil {
 		logger.Error("Failed to initialize server", logger.Err(err))
@@ -69,7 +88,7 @@ func main() {
 
 	logger.Info("Service path", logger.String("path", server.Path))
 
-	// 5. 注册路由并启动 HTTP 服务器
+	// 6. 注册路由并启动 HTTP 服务器
 	mux := http.NewServeMux()
 	mux.Handle(server.Path, server.Handler)
 
@@ -77,13 +96,7 @@ func main() {
 	mux.Handle("/health/live", health.LivenessHandler())
 	mux.Handle("/health/ready", server.Health.HTTPHandler())
 
-	// 注册 Prometheus metrics 端点
-	if cfg.Observability.Metrics.Enabled {
-		mux.Handle(cfg.Observability.Metrics.Path, metrics.HTTPHandler())
-		logger.Info("Metrics endpoint registered", logger.String("path", cfg.Observability.Metrics.Path))
-	}
-
-	// 6. 使用追踪拦截器包装 mux
+	// 7. 使用追踪拦截器包装 mux
 	handler := interceptor.TracingInterceptor(mux)
 
 	// 7. 设置信号处理

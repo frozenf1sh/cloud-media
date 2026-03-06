@@ -133,11 +133,13 @@ type ObservabilityConfig struct {
 	Tracing        TracingConfig `mapstructure:"tracing"`
 }
 
-// MetricsConfig Prometheus 指标配置
+// MetricsConfig Metrics 配置
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Path    string `mapstructure:"path"`
-	Port    int    `mapstructure:"port"`
+	Enabled      bool   `mapstructure:"enabled"`
+	Path         string `mapstructure:"path"`         // 保留用于向后兼容
+	Port         int    `mapstructure:"port"`         // 保留用于向后兼容
+	Exporter     string `mapstructure:"exporter"`     // otlp, stdout, none
+	OTLPEndpoint string `mapstructure:"otlp_endpoint"` // OTLP 接收端地址
 }
 
 // TracingConfig OpenTelemetry 追踪配置
@@ -263,6 +265,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("observability.metrics.enabled", true)
 	v.SetDefault("observability.metrics.path", "/metrics")
 	v.SetDefault("observability.metrics.port", 9090)
+	v.SetDefault("observability.metrics.exporter", "otlp")
+	v.SetDefault("observability.metrics.otlp_endpoint", "localhost:4317")
 
 	v.SetDefault("observability.tracing.enabled", true)
 	v.SetDefault("observability.tracing.exporter", "otlp")
