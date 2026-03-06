@@ -21,8 +21,10 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: amqp
+              protocol: TCP
               containerPort: 5672
             - name: management
+              protocol: TCP
               containerPort: 15672
           env:
             - name: RABBITMQ_DEFAULT_USER
