@@ -1,0 +1,80 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-media-common-config
+  namespace: cloud-media
+data:
+  config.yaml: |
+    server:
+      host: 0.0.0.0
+      port: 8080
+
+    log:
+      level: info
+      format: json
+
+    database:
+      host: postgres-service
+      port: 5432
+      user: postgres
+      dbname: media-db
+      sslmode: disable
+
+    rabbitmq:
+      url: amqp://guest:guest@rabbitmq-service:5672/
+
+    object_storage:
+      type: minio
+      internal_endpoint: minio-service:9000
+      internal_use_ssl: false
+      external_endpoint: minio-service:9000
+      external_use_ssl: false
+      access_key_id: rootadmin
+      secret_access_key: rootpassword
+      region: us-east-1
+      cdn:
+        enabled: false
+        base_url: ""
+
+    transcoder:
+      output_bucket: "media-output"
+      hls_time: 6
+      video_codec: "libx264"
+      audio_codec: "aac"
+      audio_bitrate: "128k"
+      preset: "fast"
+      gop_size: 48
+      thumbnail_size: 1080
+      timeout_multiplier: 3.0
+      min_timeout: 10
+      max_timeout: 120
+      variants:
+        - name: "1080p"
+          target_size: 1080
+          bitrate: "4000k"
+          bandwidth: 5500000
+        - name: "720p"
+          target_size: 720
+          bitrate: "2000k"
+          bandwidth: 2500000
+        - name: "480p"
+          target_size: 480
+          bitrate: "700k"
+          bandwidth: 900000
+
+    observability:
+      service_name: cloud-media
+      service_version: 1.0.0
+
+      metrics:
+        enabled: true
+        exporter: otlp
+        otlp_endpoint: otelcol-gateway-service:4317
+
+      tracing:
+        enabled: true
+        exporter: otlp
+        otlp_endpoint: otelcol-gateway-service:4317
+        sampler: always_on
+        sampler_ratio: 1.0
