@@ -14,8 +14,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	minio "github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/frozenf1sh/cloud-media/pkg/config"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
@@ -24,8 +22,8 @@ import (
 )
 
 const (
-	apiServerAddr = "http://localhost:8080"
-	pollInterval  = 2 * time.Second
+	defaultApiServerAddr = "http://media-api.frozenf1sh.loc/"
+	pollInterval         = 2 * time.Second
 )
 
 // TestConfig 测试配置
@@ -35,7 +33,6 @@ type TestConfig struct {
 	apiAddr      string
 	configPath   string
 	templatePath string
-	minioClient  *minio.Client
 	videoClient  pbconnect.VideoServiceClient
 	outputHTML   string
 }
@@ -44,8 +41,8 @@ func main() {
 	// 解析命令行参数
 	videoPath := flag.String("video", "", "Path to video file (required)")
 	taskID := flag.String("task-id", "", "Task ID (optional, auto-generated if not provided)")
-	apiAddr := flag.String("api-addr", apiServerAddr, "API server address")
-	configPath := flag.String("config", "", "Path to config.yaml")
+	apiAddr := flag.String("api-addr", defaultApiServerAddr, "API server address")
+	configPath := flag.String("config", "", "Path to config.yaml (optional)")
 	templatePath := flag.String("template", "", "Path to HTML template file (default: ./test/e2e/template.html)")
 	outputHTML := flag.String("output", "test_result.html", "Output HTML file path")
 	flag.Parse()
@@ -53,6 +50,8 @@ func main() {
 	if *videoPath == "" {
 		flag.Usage()
 		fmt.Println("\nExample: go run ./test/e2e -video ./test_video.mp4")
+		fmt.Println("\nFor k8s environment:")
+		fmt.Println("  go run ./test/e2e -video ./test/test.mp4 -api-addr http://media-api.frozenf1sh.loc/")
 		os.Exit(1)
 	}
 
@@ -88,10 +87,10 @@ func main() {
 		"api_addr", *apiAddr,
 		"template", *templatePath)
 
-	// 加载配置
+	// 加载配置（可选，用于备用）
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Warn("Failed to load config, using defaults", "error", err)
+		log.Warn("Failed to load config, not needed for API-only mode", "error", err)
 		cfg = config.Default()
 	}
 
@@ -125,20 +124,20 @@ func main() {
 
 // TestResult 测试结果
 type TestResult struct {
-	TaskID        string        `json:"task_id"`
-	VideoPath     string        `json:"video_path"`
-	Status        string        `json:"status"`
-	Progress      int           `json:"progress"`
-	SourceBucket  string        `json:"source_bucket"`
-	SourceKey     string        `json:"source_key"`
-	ErrorMessage  string        `json:"error_message,omitempty"`
-	PlaylistURL   string        `json:"playlist_url,omitempty"`
-	ThumbnailURL  string        `json:"thumbnail_url,omitempty"`
-	Duration      time.Duration `json:"duration"`
-	StartedAt     time.Time     `json:"started_at"`
-	CompletedAt   time.Time     `json:"completed_at,omitempty"`
-	Error         string        `json:"error,omitempty"`
-	StorageEndpoint string      `json:"storage_endpoint"`
+	TaskID          string        `json:"task_id"`
+	VideoPath       string        `json:"video_path"`
+	Status          string        `json:"status"`
+	Progress        int           `json:"progress"`
+	SourceBucket    string        `json:"source_bucket"`
+	SourceKey       string        `json:"source_key"`
+	ErrorMessage    string        `json:"error_message,omitempty"`
+	PlaylistURL     string        `json:"playlist_url,omitempty"`
+	ThumbnailURL    string        `json:"thumbnail_url,omitempty"`
+	Duration        time.Duration `json:"duration"`
+	StartedAt       time.Time     `json:"started_at"`
+	CompletedAt     time.Time     `json:"completed_at,omitempty"`
+	Error           string        `json:"error,omitempty"`
+	StorageEndpoint string        `json:"storage_endpoint"`
 }
 
 // runE2ETest 运行端到端测试
@@ -152,61 +151,59 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 
 	// 1. 验证视频文件存在
 	log.Info("Step 1: Checking video file")
-	if _, err := os.Stat(testCfg.videoPath); err != nil {
+	fileInfo, err := os.Stat(testCfg.videoPath)
+	if err != nil {
 		result.Error = fmt.Sprintf("video file not found: %v", err)
 		return result, fmt.Errorf("video file not found: %w", err)
 	}
-	log.Info("Video file found", "path", testCfg.videoPath)
+	log.Info("Video file found", "path", testCfg.videoPath, "size", fileInfo.Size())
 
-	// 2. 初始化 MinIO 客户端
-	log.Info("Step 2: Initializing MinIO client")
-	minioClient, err := initMinIOClient(cfg)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to init MinIO: %v", err)
-		return result, fmt.Errorf("failed to init MinIO: %w", err)
-	}
-	testCfg.minioClient = minioClient
-	log.Info("MinIO client initialized", "endpoint", cfg.ObjectStorage.InternalEndpoint)
-
-	// 3. 生成或使用任务 ID
-	if testCfg.taskID == "" {
-		testCfg.taskID = uuid.New().String()
-	}
-	result.TaskID = testCfg.taskID
-	log.Info("Using task ID", "task_id", testCfg.taskID)
-
-	// 4. 上传视频到 MinIO
-	log.Info("Step 3: Uploading video to MinIO")
-	sourceBucket := "media-input"
-	sourceKey := fmt.Sprintf("uploads/%s/%s", testCfg.taskID, filepath.Base(testCfg.videoPath))
-	result.SourceBucket = sourceBucket
-	result.SourceKey = sourceKey
-
-	if err := uploadToMinIO(ctx, log, minioClient, sourceBucket, sourceKey, testCfg.videoPath, cfg); err != nil {
-		result.Error = fmt.Sprintf("failed to upload video: %v", err)
-		return result, fmt.Errorf("failed to upload video: %w", err)
-	}
-	log.Info("Video uploaded", "bucket", sourceBucket, "key", sourceKey)
-
-	// 5. 初始化 API 客户端
-	log.Info("Step 4: Initializing API client")
+	// 2. 初始化 API 客户端
+	log.Info("Step 2: Initializing API client")
 	testCfg.videoClient = pbconnect.NewVideoServiceClient(
 		http.DefaultClient,
 		testCfg.apiAddr,
 	)
 	log.Info("API client initialized", "address", testCfg.apiAddr)
 
-	// 6. 提交转码任务
+	// 3. 获取上传预签名 URL
+	log.Info("Step 3: Getting upload URL from API")
+	fileName := filepath.Base(testCfg.videoPath)
+	uploadResp, err := getUploadURL(ctx, log, testCfg, fileName, fileInfo.Size())
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get upload URL: %v", err)
+		return result, fmt.Errorf("failed to get upload URL: %w", err)
+	}
+	testCfg.taskID = uploadResp.TaskId
+	result.TaskID = testCfg.taskID
+	result.SourceBucket = uploadResp.SourceBucket
+	result.SourceKey = uploadResp.SourceKey
+	log.Info("Got upload URL",
+		"task_id", testCfg.taskID,
+		"upload_url", uploadResp.UploadUrl,
+		"source_bucket", uploadResp.SourceBucket,
+		"source_key", uploadResp.SourceKey,
+		"expiry_seconds", uploadResp.ExpirySeconds)
+
+	// 4. 使用预签名 URL 上传视频
+	log.Info("Step 4: Uploading video via presigned URL")
+	if err := uploadViaPresignedURL(ctx, log, testCfg.videoPath, uploadResp.UploadUrl); err != nil {
+		result.Error = fmt.Sprintf("failed to upload video: %v", err)
+		return result, fmt.Errorf("failed to upload video: %w", err)
+	}
+	log.Info("Video uploaded successfully via presigned URL")
+
+	// 5. 提交转码任务
 	log.Info("Step 5: Submitting transcoding task")
-	if err := submitTask(ctx, log, testCfg, sourceBucket, sourceKey); err != nil {
+	if err := submitTask(ctx, log, testCfg, uploadResp.SourceBucket, uploadResp.SourceKey); err != nil {
 		result.Error = fmt.Sprintf("failed to submit task: %v", err)
 		return result, fmt.Errorf("failed to submit task: %w", err)
 	}
 	log.Info("Task submitted successfully")
 
-	// 7. 轮询任务状态
+	// 6. 轮询任务状态
 	log.Info("Step 6: Polling task status")
-	finalStatus, err := pollTaskStatus(ctx, log, testCfg, result)
+	finalStatus, playlistURL, thumbnailURL, err := pollTaskStatus(ctx, log, testCfg, result)
 	if err != nil {
 		result.Error = fmt.Sprintf("task failed: %v", err)
 		return result, fmt.Errorf("task failed: %w", err)
@@ -216,14 +213,12 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 	result.CompletedAt = time.Now()
 	result.Duration = result.CompletedAt.Sub(result.StartedAt)
 
-	// 8. 生成播放 URL
+	// 7. 使用从 API 返回的播放 URL
 	if finalStatus == "success" {
-		log.Info("Step 7: Generating playback URLs")
-		result.PlaylistURL = fmt.Sprintf("http://%s/media-output/%s/master.m3u8",
-			cfg.ObjectStorage.ExternalEndpoint, testCfg.taskID)
-		result.ThumbnailURL = fmt.Sprintf("http://%s/media-output/%s/thumbnail.jpg",
-			cfg.ObjectStorage.ExternalEndpoint, testCfg.taskID)
-		log.Info("Playback URLs generated",
+		log.Info("Step 7: Using playback URLs from API")
+		result.PlaylistURL = playlistURL
+		result.ThumbnailURL = thumbnailURL
+		log.Info("Playback URLs obtained from API",
 			"playlist", result.PlaylistURL,
 			"thumbnail", result.ThumbnailURL)
 	}
@@ -233,69 +228,6 @@ func runE2ETest(ctx context.Context, log *slog.Logger, testCfg *TestConfig, cfg 
 		"status", finalStatus)
 
 	return result, nil
-}
-
-// initMinIOClient 初始化 MinIO/S3 兼容客户端
-func initMinIOClient(cfg *config.Config) (*minio.Client, error) {
-	region := cfg.ObjectStorage.Region
-	if region == "" {
-		region = "us-east-1"
-	}
-	return minio.New(cfg.ObjectStorage.InternalEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.ObjectStorage.AccessKeyID, cfg.ObjectStorage.SecretAccessKey, ""),
-		Secure: cfg.ObjectStorage.InternalUseSSL,
-		Region: region,
-	})
-}
-
-// uploadToMinIO 上传文件到 MinIO/S3
-func uploadToMinIO(ctx context.Context, log *slog.Logger, client *minio.Client, bucket, key, filePath string, _ *config.Config) error {
-	// 确保 bucket 存在
-	exists, err := client.BucketExists(ctx, bucket)
-	if err != nil {
-		return fmt.Errorf("failed to check bucket: %w", err)
-	}
-	if !exists {
-		log.Info("Creating bucket", "bucket", bucket)
-		if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
-			return fmt.Errorf("failed to create bucket: %w", err)
-		}
-	}
-
-	// 打开文件
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// 获取文件信息
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	// 检测 Content-Type
-	contentType := mime.TypeByExtension(filepath.Ext(filePath))
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	log.Info("Uploading file",
-		"bucket", bucket,
-		"key", key,
-		"size", fileInfo.Size(),
-		"content_type", contentType)
-
-	// 上传文件
-	_, err = client.PutObject(ctx, bucket, key, file, fileInfo.Size(), minio.PutObjectOptions{
-		ContentType: contentType,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to put object: %w", err)
-	}
-
-	return nil
 }
 
 // submitTask 提交转码任务
@@ -327,17 +259,92 @@ func submitTask(ctx context.Context, log *slog.Logger, testCfg *TestConfig, buck
 	return nil
 }
 
+// getUploadURL 从 API 获取上传预签名 URL
+func getUploadURL(ctx context.Context, log *slog.Logger, testCfg *TestConfig, fileName string, fileSize int64) (*pb.GetUploadURLResponse, error) {
+	req := connect.NewRequest(&pb.GetUploadURLRequest{
+		TaskId:   testCfg.taskID,
+		FileName: fileName,
+		FileSize: fileSize,
+	})
+
+	resp, err := testCfg.videoClient.GetUploadURL(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("GetUploadURL failed: %w", err)
+	}
+
+	log.Info("GetUploadURL response",
+		"task_id", resp.Msg.TaskId,
+		"upload_url", resp.Msg.UploadUrl,
+		"source_bucket", resp.Msg.SourceBucket,
+		"source_key", resp.Msg.SourceKey,
+		"expiry_seconds", resp.Msg.ExpirySeconds)
+
+	return resp.Msg, nil
+}
+
+// uploadViaPresignedURL 使用预签名 URL 上传文件
+func uploadViaPresignedURL(ctx context.Context, log *slog.Logger, filePath, uploadURL string) error {
+	// 打开文件
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// 获取文件信息
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// 创建 HTTP PUT 请求
+	httpReq, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, file)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.ContentLength = fileInfo.Size()
+
+	// 检测 Content-Type
+	contentType := mime.TypeByExtension(filepath.Ext(filePath))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	httpReq.Header.Set("Content-Type", contentType)
+
+	log.Info("Uploading file via presigned URL",
+		"url", uploadURL,
+		"size", fileInfo.Size(),
+		"content_type", contentType)
+
+	// 执行请求
+	client := &http.Client{
+		Timeout: 30 * time.Minute, // 大文件上传需要较长时间
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to upload file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
+	}
+
+	log.Info("File uploaded successfully via presigned URL", "status_code", resp.StatusCode)
+	return nil
+}
+
 // pollTaskStatus 轮询任务状态
-func pollTaskStatus(ctx context.Context, log *slog.Logger, testCfg *TestConfig, result *TestResult) (string, error) {
+func pollTaskStatus(ctx context.Context, log *slog.Logger, testCfg *TestConfig, result *TestResult) (string, string, string, error) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", "", "", ctx.Err()
 		case <-ticker.C:
-			status, progress, errMsg, err := getTaskStatus(ctx, testCfg)
+			status, progress, errMsg, playlistURL, thumbnailURL, err := getTaskStatus(ctx, testCfg)
 			if err != nil {
 				log.Warn("Failed to get task status", "error", err)
 				continue
@@ -350,33 +357,35 @@ func pollTaskStatus(ctx context.Context, log *slog.Logger, testCfg *TestConfig, 
 			log.Info("Task status update",
 				"status", status,
 				"progress", progress,
-				"error", errMsg)
+				"error", errMsg,
+				"playlist_url", playlistURL,
+				"thumbnail_url", thumbnailURL)
 
 			// 检查终端状态
 			switch status {
 			case "success":
-				return status, nil
+				return status, playlistURL, thumbnailURL, nil
 			case "failed":
-				return status, fmt.Errorf("task failed: %s", errMsg)
+				return status, "", "", fmt.Errorf("task failed: %s", errMsg)
 			case "cancelled":
-				return status, fmt.Errorf("task was cancelled")
+				return status, "", "", fmt.Errorf("task was cancelled")
 			}
 		}
 	}
 }
 
 // getTaskStatus 获取任务状态
-func getTaskStatus(ctx context.Context, testCfg *TestConfig) (string, int, string, error) {
+func getTaskStatus(ctx context.Context, testCfg *TestConfig) (string, int, string, string, string, error) {
 	req := connect.NewRequest(&pb.GetTaskStatusRequest{
 		TaskId: testCfg.taskID,
 	})
 
 	resp, err := testCfg.videoClient.GetTaskStatus(ctx, req)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", "", "", err
 	}
 
-	return resp.Msg.Status, int(resp.Msg.Progress), resp.Msg.ErrorMessage, nil
+	return resp.Msg.Status, int(resp.Msg.Progress), resp.Msg.ErrorMessage, resp.Msg.PlaylistUrl, resp.Msg.ThumbnailUrl, nil
 }
 
 // generateHTMLReport 生成 HTML 报告

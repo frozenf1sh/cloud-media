@@ -11,7 +11,7 @@ data:
       port: 8080
 
     log:
-      level: info
+      level: debug
       format: json
 
     database:
@@ -28,7 +28,7 @@ data:
       type: minio
       internal_endpoint: minio-service:9000
       internal_use_ssl: false
-      external_endpoint: minio-service:9000
+      external_endpoint: media-oss.frozenf1sh.loc:80
       external_use_ssl: false
       access_key_id: rootadmin
       secret_access_key: rootpassword

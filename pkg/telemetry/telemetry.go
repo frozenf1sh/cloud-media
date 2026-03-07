@@ -18,8 +18,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Config 追踪配置
@@ -63,13 +61,23 @@ func NewTracerProvider(ctx context.Context, cfg Config) (*TracerProvider, error)
 		resource.WithTelemetrySDK(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+		slog.Warn("Failed to create tracing resource, tracing will be disabled", "error", err)
+		return &TracerProvider{
+			provider: nil,
+			tracer:   otel.Tracer("noop"),
+			config:   cfg,
+		}, nil
 	}
 
 	// 创建采样器
 	sampler, err := createSampler(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sampler: %w", err)
+		slog.Warn("Failed to create sampler, tracing will be disabled", "error", err)
+		return &TracerProvider{
+			provider: nil,
+			tracer:   otel.Tracer("noop"),
+			config:   cfg,
+		}, nil
 	}
 	slog.Info("Tracing sampler configured",
 		"sampler_type", cfg.Sampler,
@@ -78,7 +86,12 @@ func NewTracerProvider(ctx context.Context, cfg Config) (*TracerProvider, error)
 	// 创建导出器
 	exporter, err := createExporter(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create exporter: %w", err)
+		slog.Warn("Failed to create tracing exporter, tracing will be disabled", "error", err)
+		return &TracerProvider{
+			provider: nil,
+			tracer:   otel.Tracer("noop"),
+			config:   cfg,
+		}, nil
 	}
 
 	// 创建 TracerProvider
@@ -259,20 +272,19 @@ func createOTLPExporter(ctx context.Context, endpoint string) (sdktrace.SpanExpo
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient(
-		endpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	// 使用非阻塞方式创建 OTLP 导出器，不等待连接建立
+	exporter, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithReconnectionPeriod(5*time.Second),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
+		// 即使创建失败也不返回错误，使用 stdout 导出器作为备选
+		slog.Warn("Failed to create OTLP trace exporter, falling back to no-op", "error", err, "endpoint", endpoint)
+		return stdouttrace.New(stdouttrace.WithPrettyPrint())
 	}
 
-	exporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
-	}
-
-	slog.Info("OTLP exporter initialized", "endpoint", endpoint)
+	slog.Info("OTLP trace exporter initialized", "endpoint", endpoint)
 	return exporter, nil
 }
 

@@ -33,6 +33,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// VideoServiceGetUploadURLProcedure is the fully-qualified name of the VideoService's GetUploadURL
+	// RPC.
+	VideoServiceGetUploadURLProcedure = "/api.v1.VideoService/GetUploadURL"
 	// VideoServiceSubmitTaskProcedure is the fully-qualified name of the VideoService's SubmitTask RPC.
 	VideoServiceSubmitTaskProcedure = "/api.v1.VideoService/SubmitTask"
 	// VideoServiceGetTaskStatusProcedure is the fully-qualified name of the VideoService's
@@ -46,6 +49,8 @@ const (
 
 // VideoServiceClient is a client for the api.v1.VideoService service.
 type VideoServiceClient interface {
+	// 获取上传预签名 URL
+	GetUploadURL(context.Context, *connect.Request[v1.GetUploadURLRequest]) (*connect.Response[v1.GetUploadURLResponse], error)
 	// 提交视频转码任务
 	SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error)
 	// 获取任务状态
@@ -66,6 +71,11 @@ type VideoServiceClient interface {
 func NewVideoServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) VideoServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &videoServiceClient{
+		getUploadURL: connect.NewClient[v1.GetUploadURLRequest, v1.GetUploadURLResponse](
+			httpClient,
+			baseURL+VideoServiceGetUploadURLProcedure,
+			opts...,
+		),
 		submitTask: connect.NewClient[v1.SubmitTaskRequest, v1.SubmitTaskResponse](
 			httpClient,
 			baseURL+VideoServiceSubmitTaskProcedure,
@@ -91,10 +101,16 @@ func NewVideoServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 
 // videoServiceClient implements VideoServiceClient.
 type videoServiceClient struct {
+	getUploadURL  *connect.Client[v1.GetUploadURLRequest, v1.GetUploadURLResponse]
 	submitTask    *connect.Client[v1.SubmitTaskRequest, v1.SubmitTaskResponse]
 	getTaskStatus *connect.Client[v1.GetTaskStatusRequest, v1.GetTaskStatusResponse]
 	listTasks     *connect.Client[v1.ListTasksRequest, v1.ListTasksResponse]
 	cancelTask    *connect.Client[v1.CancelTaskRequest, v1.CancelTaskResponse]
+}
+
+// GetUploadURL calls api.v1.VideoService.GetUploadURL.
+func (c *videoServiceClient) GetUploadURL(ctx context.Context, req *connect.Request[v1.GetUploadURLRequest]) (*connect.Response[v1.GetUploadURLResponse], error) {
+	return c.getUploadURL.CallUnary(ctx, req)
 }
 
 // SubmitTask calls api.v1.VideoService.SubmitTask.
@@ -119,6 +135,8 @@ func (c *videoServiceClient) CancelTask(ctx context.Context, req *connect.Reques
 
 // VideoServiceHandler is an implementation of the api.v1.VideoService service.
 type VideoServiceHandler interface {
+	// 获取上传预签名 URL
+	GetUploadURL(context.Context, *connect.Request[v1.GetUploadURLRequest]) (*connect.Response[v1.GetUploadURLResponse], error)
 	// 提交视频转码任务
 	SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error)
 	// 获取任务状态
@@ -135,6 +153,11 @@ type VideoServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewVideoServiceHandler(svc VideoServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	videoServiceGetUploadURLHandler := connect.NewUnaryHandler(
+		VideoServiceGetUploadURLProcedure,
+		svc.GetUploadURL,
+		opts...,
+	)
 	videoServiceSubmitTaskHandler := connect.NewUnaryHandler(
 		VideoServiceSubmitTaskProcedure,
 		svc.SubmitTask,
@@ -157,6 +180,8 @@ func NewVideoServiceHandler(svc VideoServiceHandler, opts ...connect.HandlerOpti
 	)
 	return "/api.v1.VideoService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case VideoServiceGetUploadURLProcedure:
+			videoServiceGetUploadURLHandler.ServeHTTP(w, r)
 		case VideoServiceSubmitTaskProcedure:
 			videoServiceSubmitTaskHandler.ServeHTTP(w, r)
 		case VideoServiceGetTaskStatusProcedure:
@@ -173,6 +198,10 @@ func NewVideoServiceHandler(svc VideoServiceHandler, opts ...connect.HandlerOpti
 
 // UnimplementedVideoServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedVideoServiceHandler struct{}
+
+func (UnimplementedVideoServiceHandler) GetUploadURL(context.Context, *connect.Request[v1.GetUploadURLRequest]) (*connect.Response[v1.GetUploadURLResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.GetUploadURL is not implemented"))
+}
 
 func (UnimplementedVideoServiceHandler) SubmitTask(context.Context, *connect.Request[v1.SubmitTaskRequest]) (*connect.Response[v1.SubmitTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("api.v1.VideoService.SubmitTask is not implemented"))

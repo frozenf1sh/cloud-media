@@ -72,12 +72,17 @@ func NewMetricsProvider(ctx context.Context, cfg Config) (*MetricsProvider, erro
 		resource.WithTelemetrySDK(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+		slog.Warn("Failed to create metrics resource, metrics will be disabled", "error", err)
+		globalProvider = provider
+		return provider, nil
 	}
 
 	if cfg.Exporter == "otlp" || cfg.Exporter == "stdout" {
 		if err := provider.initExporter(ctx, res, cfg); err != nil {
-			return nil, fmt.Errorf("failed to init exporter: %w", err)
+			slog.Warn("Failed to init metrics exporter, metrics will be disabled", "error", err)
+			// 即使 exporter 初始化失败也返回 provider，只是不启用实际 metrics
+			globalProvider = provider
+			return provider, nil
 		}
 	}
 
@@ -101,11 +106,16 @@ func (p *MetricsProvider) initExporter(ctx context.Context, res *resource.Resour
 			otlpmetricgrpc.WithEndpoint(cfg.OTLPEndpoint),
 			otlpmetricgrpc.WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 			otlpmetricgrpc.WithInsecure(),
+			otlpmetricgrpc.WithReconnectionPeriod(5*time.Second),
 		)
 		if err != nil {
-			return fmt.Errorf("failed to create OTLP metric exporter: %w", err)
+			slog.Warn("Failed to create OTLP metric exporter, metrics will operate without exporting", "error", err, "endpoint", cfg.OTLPEndpoint)
+			// 使用空 reader，不导出 metrics 但保持 API 可用
+			reader = sdkmetric.NewPeriodicReader(nil, sdkmetric.WithInterval(60*time.Second))
+		} else {
+			reader = sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(15*time.Second))
+			slog.Info("OTLP metrics exporter initialized", "endpoint", cfg.OTLPEndpoint)
 		}
-		reader = sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(15*time.Second))
 	} else {
 		reader = sdkmetric.NewPeriodicReader(nil, sdkmetric.WithInterval(60*time.Second))
 	}
@@ -121,7 +131,6 @@ func (p *MetricsProvider) initExporter(ctx context.Context, res *resource.Resour
 		return err
 	}
 
-	slog.Info("OTLP metrics exporter initialized", "endpoint", cfg.OTLPEndpoint)
 	return nil
 }
 

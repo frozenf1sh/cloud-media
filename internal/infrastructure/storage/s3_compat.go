@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/config"
+	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/google/wire"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -36,6 +38,17 @@ func NewS3CompatStorage(cfg *config.ObjectStorageConfig) (*S3CompatStorage, erro
 		region = "us-east-1"
 	}
 
+	logger.Debug("Initializing S3 compatible storage",
+		logger.String("type", string(cfg.Type)),
+		logger.String("internal_endpoint", cfg.InternalEndpoint),
+		logger.String("internal_use_ssl", fmt.Sprintf("%t", cfg.InternalUseSSL)),
+		logger.String("external_endpoint", cfg.ExternalEndpoint),
+		logger.String("external_use_ssl", fmt.Sprintf("%t", cfg.ExternalUseSSL)),
+		logger.String("region", region),
+		logger.String("cdn_enabled", fmt.Sprintf("%t", cfg.CDN.Enabled)),
+		logger.String("cdn_base_url", cfg.CDN.BaseURL),
+	)
+
 	// 1. 初始化内网核心客户端（用于实际操作）
 	coreOptions := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
@@ -46,6 +59,7 @@ func NewS3CompatStorage(cfg *config.ObjectStorageConfig) (*S3CompatStorage, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to create internal storage client: %w", err)
 	}
+	logger.Debug("Internal storage client created", logger.String("endpoint", cfg.InternalEndpoint))
 
 	// 2. 初始化外网签名客户端（仅用于生成预签名 URL）
 	signerOptions := &minio.Options{
@@ -57,6 +71,7 @@ func NewS3CompatStorage(cfg *config.ObjectStorageConfig) (*S3CompatStorage, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer storage client: %w", err)
 	}
+	logger.Debug("Signer storage client created", logger.String("endpoint", cfg.ExternalEndpoint))
 
 	return &S3CompatStorage{
 		coreClient:   coreClient,
@@ -101,9 +116,19 @@ func (s *S3CompatStorage) DownloadFile(ctx context.Context, bucket, key string) 
 
 // GetPresignedURL 获取访问 URL（优先使用 CDN，回退到预签名 URL）
 func (s *S3CompatStorage) GetPresignedURL(ctx context.Context, bucket, key string, method string, expiry int64) (string, error) {
+	logger.DebugContext(ctx, "Generating presigned URL",
+		logger.String("bucket", bucket),
+		logger.String("key", key),
+		logger.String("method", method),
+		logger.Int64("expiry_seconds", expiry),
+		logger.String("cdn_enabled", fmt.Sprintf("%t", s.cdnConfig.Enabled)),
+	)
+
 	// 如果启用了 CDN 且是 GET 请求，直接返回 CDN URL
 	if s.cdnConfig.Enabled && method == "GET" {
-		return s.buildCDNURL(bucket, key), nil
+		cdnURL := s.buildCDNURL(bucket, key)
+		logger.DebugContext(ctx, "Using CDN URL", logger.String("url", cdnURL))
+		return cdnURL, nil
 	}
 
 	// 否则使用预签名 URL
@@ -112,18 +137,50 @@ func (s *S3CompatStorage) GetPresignedURL(ctx context.Context, bucket, key strin
 
 	switch method {
 	case "GET":
+		logger.DebugContext(ctx, "Generating presigned GET URL")
 		u, err = s.signerClient.PresignedGetObject(ctx, bucket, key, time.Duration(expiry)*time.Second, url.Values{})
 	case "PUT":
+		logger.DebugContext(ctx, "Generating presigned PUT URL")
 		u, err = s.signerClient.PresignedPutObject(ctx, bucket, key, time.Duration(expiry)*time.Second)
 	default:
 		err = fmt.Errorf("unsupported HTTP method: %s", method)
 	}
 
 	if err != nil {
+		logger.ErrorContext(ctx, "Failed to generate presigned URL", logger.Err(err))
 		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
 	}
 
-	return u.String(), nil
+	logger.DebugContext(ctx, "Raw presigned URL generated",
+		logger.String("raw_url", u.String()),
+		logger.String("scheme", u.Scheme),
+		logger.String("host", u.Host),
+		logger.String("path", u.Path),
+	)
+
+	// 去掉标准端口（http:80, https:443）
+	originalHost := u.Host
+	if (u.Scheme == "http" && u.Host == strings.TrimSuffix(u.Host, ":80")) ||
+		(u.Scheme == "https" && u.Host == strings.TrimSuffix(u.Host, ":443")) {
+		// 已经没有端口，无需处理
+		logger.DebugContext(ctx, "No standard port to remove")
+	} else if u.Scheme == "http" && strings.HasSuffix(u.Host, ":80") {
+		u.Host = strings.TrimSuffix(u.Host, ":80")
+		logger.DebugContext(ctx, "Removed port :80 from URL",
+			logger.String("original_host", originalHost),
+			logger.String("new_host", u.Host),
+		)
+	} else if u.Scheme == "https" && strings.HasSuffix(u.Host, ":443") {
+		u.Host = strings.TrimSuffix(u.Host, ":443")
+		logger.DebugContext(ctx, "Removed port :443 from URL",
+			logger.String("original_host", originalHost),
+			logger.String("new_host", u.Host),
+		)
+	}
+
+	finalURL := u.String()
+	logger.DebugContext(ctx, "Final presigned URL", logger.String("url", finalURL))
+	return finalURL, nil
 }
 
 // ListObjects 列出存储桶中的对象（使用内网客户端）
