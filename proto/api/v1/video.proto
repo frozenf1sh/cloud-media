@@ -4,6 +4,8 @@ package api.v1;
 option go_package = "github.com/frozenf1sh/cloud-media/proto/gen/api/v1";
 
 service VideoService {
+  // 获取上传预签名 URL
+  rpc GetUploadURL(GetUploadURLRequest) returns (GetUploadURLResponse) {}
   // 提交视频转码任务
   rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse) {}
   // 获取任务状态
@@ -12,6 +14,20 @@ service VideoService {
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {}
   // 取消任务
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse) {}
+}
+
+message GetUploadURLRequest {
+  string task_id = 1;        // 任务ID（可选，自动生成）
+  string file_name = 2;      // 文件名
+  int64 file_size = 3;       // 文件大小（字节）
+}
+
+message GetUploadURLResponse {
+  string task_id = 1;        // 任务ID
+  string upload_url = 2;      // 预签名上传 URL
+  string source_bucket = 3;     // 源文件存储桶
+  string source_key = 4;      // 源文件在 MinIO 中的路径
+  int64 expiry_seconds = 5;   // URL 有效期（秒）
 }
 
 message SubmitTaskRequest {
@@ -40,6 +56,9 @@ message GetTaskStatusResponse {
   int64 created_at = 7;
   int64 started_at = 8;
   int64 completed_at = 9;
+  // 成功时返回的播放 URL
+  string playlist_url = 10;     // HLS 播放列表 URL
+  string thumbnail_url = 11;    // 封面图 URL
 }
 
 message ListTasksRequest {

@@ -37,6 +37,9 @@ func main() {
 		logger.String("version", cfg.Observability.ServiceVersion),
 	)
 
+	// 打印配置（DEBUG级别）
+	logger.Debug("Loaded configuration", logger.String("config", cfg.Dump()))
+
 	ctx := context.Background()
 	tracerProvider, err := telemetry.NewTracerProvider(ctx, telemetry.Config{
 		ServiceName:    cfg.Observability.ServiceName,

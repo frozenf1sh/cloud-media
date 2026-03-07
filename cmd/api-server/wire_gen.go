@@ -30,7 +30,12 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 	videoTaskRepository := persistence.NewVideoTaskRepository(db)
-	videoUseCase := usecase.NewVideoUseCase(rabbitMQBroker, videoTaskRepository)
+	objectStorageConfig := provideObjectStorageConfig(cfg)
+	s3CompatStorage, err := storage.NewS3CompatStorage(objectStorageConfig)
+	if err != nil {
+		return nil, err
+	}
+	videoUseCase := usecase.NewVideoUseCase(rabbitMQBroker, videoTaskRepository, s3CompatStorage)
 	videoServer := rpc.NewVideoServer(videoUseCase)
 	database := persistence.NewDatabase(db)
 	server := NewServer(videoServer, database)

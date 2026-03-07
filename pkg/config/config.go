@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/spf13/viper"
 )
@@ -160,19 +162,25 @@ func Load(filePath string) (*Config, error) {
 
 	// 配置文件设置
 	if filePath != "" {
+		slog.Info("Loading config from specified path", "path", filePath)
 		v.SetConfigFile(filePath)
 	} else {
+		slog.Info("Searching for config file in default paths")
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
+		v.AddConfigPath("/app")
 		v.AddConfigPath("./config")
 		v.AddConfigPath("/etc/cloud-media")
 	}
 
 	// 读取配置文件
 	if err := v.ReadInConfig(); err != nil {
+		slog.Warn("Failed to read config file, using defaults", "error", err)
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
+
+	slog.Info("Config file loaded successfully", "path", v.ConfigFileUsed())
 
 	// 支持环境变量覆盖
 	v.AutomaticEnv()
@@ -283,4 +291,26 @@ func (s *ServerConfig) Address() string {
 // MetricsAddress 返回 Prometheus 指标监听地址
 func (m *MetricsConfig) Address() string {
 	return fmt.Sprintf(":%d", m.Port)
+}
+
+// Dump 返回配置的 JSON 字符串（用于调试，会隐藏敏感信息）
+func (c *Config) Dump() string {
+	// 创建一个副本，隐藏敏感信息
+	safeCfg := *c
+	safeCfg.Database.Password = "***REDACTED***"
+	safeCfg.ObjectStorage.SecretAccessKey = "***REDACTED***"
+	safeCfg.ObjectStorage.AccessKeyID = maskString(safeCfg.ObjectStorage.AccessKeyID)
+
+	data, err := json.MarshalIndent(safeCfg, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("failed to dump config: %v", err)
+	}
+	return string(data)
+}
+
+func maskString(s string) string {
+	if len(s) <= 4 {
+		return "***"
+	}
+	return s[:2] + "..." + s[len(s)-2:]
 }

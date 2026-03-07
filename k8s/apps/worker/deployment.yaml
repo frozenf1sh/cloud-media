@@ -19,7 +19,7 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/frozenf1sh/cloud-media-worker:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               protocol: TCP

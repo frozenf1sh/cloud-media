@@ -18,13 +18,15 @@ var ProviderSet = wire.NewSet(NewVideoUseCase, WorkerProviderSet)
 type VideoUseCase struct {
 	mq         domain.MQBroker
 	repository domain.VideoTaskRepository
+	storage    domain.ObjectStorage
 }
 
 // NewVideoUseCase 创建 VideoUseCase 实例
-func NewVideoUseCase(mq domain.MQBroker, repo domain.VideoTaskRepository) *VideoUseCase {
+func NewVideoUseCase(mq domain.MQBroker, repo domain.VideoTaskRepository, storage domain.ObjectStorage) *VideoUseCase {
 	return &VideoUseCase{
 		mq:         mq,
 		repository: repo,
+		storage:    storage,
 	}
 }
 
@@ -107,8 +109,74 @@ func (uc *VideoUseCase) SubmitTranscodeTask(ctx context.Context, taskID, sourceB
 	return task, nil
 }
 
+// GetUploadURL 获取上传预签名 URL
+func (uc *VideoUseCase) GetUploadURL(ctx context.Context, taskID, fileName string) (string, string, string, string, int64, error) {
+	ctx, span := telemetry.StartSpan(ctx, "VideoUseCase.GetUploadURL",
+		telemetry.String("task_id", taskID),
+		telemetry.String("file_name", fileName),
+	)
+	defer span.End()
+
+	// 如果客户端没有提供 taskID，由服务端生成
+	if taskID == "" {
+		taskID = uuid.New().String()
+	}
+
+	// 构建 source key
+	sourceBucket := "media-input"
+	sourceKey := "uploads/" + taskID + "/" + fileName
+
+	// 生成预签名 URL，有效期 1 小时
+	expiry := int64(3600)
+	uploadURL, err := uc.storage.GetPresignedURL(ctx, sourceBucket, sourceKey, "PUT", expiry)
+	if err != nil {
+		telemetry.RecordError(ctx, err)
+		return "", "", "", "", 0, errors.InternalWrap("failed to generate upload URL", err)
+	}
+
+	logger.InfoContext(ctx, "Generated upload URL",
+		logger.String("task_id", taskID),
+		logger.String("source_bucket", sourceBucket),
+		logger.String("source_key", sourceKey),
+	)
+
+	telemetry.SetSpanStatusOK(ctx)
+	return taskID, uploadURL, sourceBucket, sourceKey, expiry, nil
+}
+
+// GetPlaybackURLs 获取播放 URL
+func (uc *VideoUseCase) GetPlaybackURLs(ctx context.Context, task *domain.VideoTask) (playlistURL, thumbnailURL string, err error) {
+	ctx, span := telemetry.StartSpan(ctx, "VideoUseCase.GetPlaybackURLs",
+		telemetry.String("task_id", task.TaskID),
+	)
+	defer span.End()
+
+	if task.OutputInfo == nil {
+		return "", "", nil
+	}
+
+	// 生成播放列表 URL（预签名 7 天）
+	if task.OutputInfo.PlaylistPath != "" && task.OutputInfo.OutputBucket != "" {
+		playlistURL, err = uc.storage.GetPresignedURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.PlaylistPath, "GET", 604800)
+		if err != nil {
+			logger.WarnContext(ctx, "Failed to generate playlist URL", logger.Err(err))
+		}
+	}
+
+	// 生成缩略图 URL（预签名 7 天）
+	if task.OutputInfo.ThumbnailPath != "" && task.OutputInfo.OutputBucket != "" {
+		thumbnailURL, err = uc.storage.GetPresignedURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.ThumbnailPath, "GET", 604800)
+		if err != nil {
+			logger.WarnContext(ctx, "Failed to generate thumbnail URL", logger.Err(err))
+		}
+	}
+
+	telemetry.SetSpanStatusOK(ctx)
+	return playlistURL, thumbnailURL, nil
+}
+
 // GetTaskStatus 获取任务状态
-func (uc *VideoUseCase) GetTaskStatus(ctx context.Context, taskID string) (*domain.VideoTask, error) {
+func (uc *VideoUseCase) GetTaskStatus(ctx context.Context, taskID string) (*domain.VideoTask, string, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "VideoUseCase.GetTaskStatus",
 		telemetry.String("task_id", taskID),
 	)
@@ -118,17 +186,23 @@ func (uc *VideoUseCase) GetTaskStatus(ctx context.Context, taskID string) (*doma
 	if taskID == "" {
 		err := errors.InvalidArgument("task_id is required")
 		telemetry.RecordError(ctx, err)
-		return nil, err
+		return nil, "", "", err
 	}
 
 	task, err := uc.repository.GetByTaskID(ctx, taskID)
 	if err != nil {
 		telemetry.RecordError(ctx, err)
-		return nil, err
+		return nil, "", "", err
+	}
+
+	// 如果任务成功，生成播放 URL
+	var playlistURL, thumbnailURL string
+	if task.Status == domain.TaskStatusSuccess {
+		playlistURL, thumbnailURL, _ = uc.GetPlaybackURLs(ctx, task)
 	}
 
 	telemetry.SetSpanStatusOK(ctx)
-	return task, nil
+	return task, playlistURL, thumbnailURL, nil
 }
 
 // ListTasks 列出任务

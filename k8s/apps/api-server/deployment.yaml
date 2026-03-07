@@ -19,7 +19,7 @@ spec:
       containers:
         - name: api-server
           image: ghcr.io/frozenf1sh/cloud-media-api-server:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               protocol: TCP

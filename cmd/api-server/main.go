@@ -38,6 +38,9 @@ func main() {
 		logger.String("version", cfg.Observability.ServiceVersion),
 	)
 
+	// 打印配置（DEBUG级别）
+	logger.Debug("Loaded configuration", logger.String("config", cfg.Dump()))
+
 	// 3. 初始化 OpenTelemetry
 	ctx := context.Background()
 	tracerProvider, err := telemetry.NewTracerProvider(ctx, telemetry.Config{

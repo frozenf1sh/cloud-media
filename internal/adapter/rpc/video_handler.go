@@ -25,6 +25,32 @@ func NewVideoServer(uc *usecase.VideoUseCase) *VideoServer {
 	return &VideoServer{usecase: uc}
 }
 
+// GetUploadURL 获取上传预签名 URL
+func (s *VideoServer) GetUploadURL(
+	ctx context.Context,
+	req *connect.Request[pb.GetUploadURLRequest],
+) (*connect.Response[pb.GetUploadURLResponse], error) {
+	ctx, span := telemetry.StartSpan(ctx, "VideoServer.GetUploadURL",
+		telemetry.String("task_id", req.Msg.TaskId),
+		telemetry.String("file_name", req.Msg.FileName),
+	)
+	defer span.End()
+
+	taskID, uploadURL, sourceBucket, sourceKey, expiry, err := s.usecase.GetUploadURL(ctx, req.Msg.TaskId, req.Msg.FileName)
+	if err != nil {
+		return nil, toConnectError(ctx, err)
+	}
+
+	telemetry.SetSpanStatusOK(ctx)
+	return connect.NewResponse(&pb.GetUploadURLResponse{
+		TaskId:        taskID,
+		UploadUrl:     uploadURL,
+		SourceBucket:  sourceBucket,
+		SourceKey:     sourceKey,
+		ExpirySeconds: expiry,
+	}), nil
+}
+
 // toConnectError 将应用错误转换为 Connect RPC 错误
 func toConnectError(ctx context.Context, err error) *connect.Error {
 	// 记录错误到 span
@@ -90,19 +116,21 @@ func (s *VideoServer) GetTaskStatus(
 	)
 	defer span.End()
 
-	task, err := s.usecase.GetTaskStatus(ctx, req.Msg.TaskId)
+	task, playlistURL, thumbnailURL, err := s.usecase.GetTaskStatus(ctx, req.Msg.TaskId)
 	if err != nil {
 		return nil, toConnectError(ctx, err)
 	}
 
 	resp := &pb.GetTaskStatusResponse{
-		TaskId:       task.TaskID,
+		TaskId:        task.TaskID,
 		Status:        string(task.Status),
 		Progress:      int32(task.Progress),
 		SourceBucket:  task.SourceBucket,
 		SourceKey:     task.SourceKey,
 		ErrorMessage:  task.ErrorMessage,
-		CreatedAt:    task.CreatedAt,
+		CreatedAt:     task.CreatedAt,
+		PlaylistUrl:   playlistURL,
+		ThumbnailUrl:  thumbnailURL,
 	}
 
 	if task.StartedAt != nil {
