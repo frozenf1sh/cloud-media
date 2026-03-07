@@ -35,12 +35,14 @@
 *   **封面自动截取**：高效提取视频首帧作为预览缩略图。
 
 ### 🏗️ 云原生架构
+*   **Worker Pool + Queue 模式**：基于 RabbitMQ + KEDA 构建弹性 Worker 池，每个 Pod 单任务处理，支持 Scale-to-Zero。
 *   **异步削峰**：基于 RabbitMQ 构建高可靠任务队列，实现 API 层与计算层的彻底解耦。
 *   **多云存储支持**：支持 MinIO、AWS S3、Cloudflare R2 等多种 S3 兼容对象存储。
 *   **CDN 集成**：支持配置 CDN 加速，替代预签名 URL 提升访问速度。
 *   **内外网隔离存储**：设计 **双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
 *   **双服务独立配置**：API Server 和 Worker 使用独立配置文件，支持不同的服务名和端口配置。
 *   **整洁架构**：严格遵循依赖倒置原则，层级分明（Domain/UseCase/Adapter/Infra），易于测试与维护。
+*   **Kubernetes 原生**：完整 k3s 部署配置，支持 Kustomize 分层部署。
 
 ### 🔭 极致可观测性
 *   **分布式追踪**：集成 OpenTelemetry + Grafana Tempo，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
@@ -69,7 +71,8 @@
 | **对象存储** | MinIO / AWS S3 / Cloudflare R2 | 支持多种 S3 兼容存储 |
 | **CDN** | Cloudflare CDN (可选) | 全球边缘节点加速 |
 | **转码核心** | FFmpeg | 行业标准音视频处理工具 |
-| **可观测性** | OpenTelemetry + Prometheus + Grafana | 日志(Loki) + 追踪(Tempo) + 指标 |
+| **可观测性** | OpenTelemetry + LGTM Stack | 日志(Loki) + 追踪(Tempo) + 指标(Mimir) |
+| **自动扩缩容** | KEDA | 基于队列长度 + CPU 使用率，支持 Scale-to-Zero |
 | **ORM** | GORM | 数据持久层封装 |
 | **IDL 管理** | Protobuf + Buf v2 | 现代化的 API 定义与代码生成 |
 
@@ -262,7 +265,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **基础架构**: Clean Architecture, DI (Wire), GORM, Viper
 *   [x] **核心功能**: 视频上传, HLS 切片, 封面生成
 *   [x] **异步处理**: RabbitMQ 集成与死信队列处理
-*   [x] **可观测性**: Metrics & Tracing (Otel) + Loki + Tempo
+*   [x] **可观测性**: Metrics & Tracing (Otel) + LGTM Stack (Loki/Tempo/Mimir)
 *   [x] **多云存储**: MinIO / AWS S3 / Cloudflare R2 支持
 *   [x] **CDN 集成**: CDN URL 支持
 *   [x] **CI/CD**: GitHub Actions 自动构建
@@ -272,14 +275,18 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **OTel Span 状态**: 错误时设置 Span Status 为 Error，成功时设置为 OK
 *   [x] **单元测试**: pkg/errors、pkg/ffmpeg、pkg/telemetry 完整测试覆盖
 *   [x] **可配置转码参数**: FFmpeg 所有硬编码参数现在可配置
+*   [x] **Kubernetes 部署**: 完整 k3s 部署配置（k8s/ 目录）
+*   [x] **KEDA 动态扩缩容**: 基于 RabbitMQ 队列长度 + CPU 使用率，支持 Scale-to-Zero
+*   [x] **Worker 幂等性**: 数据库事务 + SELECT FOR UPDATE 原子性状态转换
+*   [x] **preStop 智能等待**: /status 端点 + 脚本等待活动任务完成
+*   [x] **可观测性优雅降级**: traces/metrics 初始化失败时降级为 noop
+*   [x] **自动创建 Bucket**: API Server 和 Worker 启动时自动创建 media-input/media-output
 
 ### 进行中
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
 *   [ ] **WebHook**: 任务完成回调通知
 
 ### 未来规划
-*   [ ] **Kubernetes 迁移**: 迁移到 k3s
-*   [ ] **KEDA 动态扩缩容**: 基于 RabbitMQ 队列长度的扩缩容，支持 Scale-to-Zero
 *   [ ] **大视频分片上传**: S3 Multipart Upload 支持，断点续传
 *   [ ] **管道流处理**: 使用 io.Pipe 边下边转码，减少磁盘 I/O
 
