@@ -244,16 +244,26 @@ func (s *S3CompatStorage) DownloadToWriter(ctx context.Context, bucket, key stri
 	return nil
 }
 
-// ensureBucketExists 确保存储桶存在，不存在则创建
+// EnsureBucketExists 确保存储桶存在，不存在则创建
+func (s *S3CompatStorage) EnsureBucketExists(ctx context.Context, bucket string) error {
+	return s.ensureBucketExists(ctx, bucket)
+}
+
+// ensureBucketExists 确保存储桶存在，不存在则创建（内部方法）
 func (s *S3CompatStorage) ensureBucketExists(ctx context.Context, bucket string) error {
+	logger.DebugContext(ctx, "Checking if bucket exists", logger.String("bucket", bucket))
 	exists, err := s.coreClient.BucketExists(ctx, bucket)
 	if err != nil {
 		return fmt.Errorf("failed to check bucket existence: %w", err)
 	}
 	if !exists {
+		logger.InfoContext(ctx, "Bucket does not exist, creating it", logger.String("bucket", bucket))
 		if err := s.coreClient.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
 			return fmt.Errorf("failed to create bucket: %w", err)
 		}
+		logger.InfoContext(ctx, "Bucket created successfully", logger.String("bucket", bucket))
+	} else {
+		logger.DebugContext(ctx, "Bucket already exists", logger.String("bucket", bucket))
 	}
 	return nil
 }
