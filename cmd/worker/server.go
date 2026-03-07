@@ -12,6 +12,11 @@ import (
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 )
 
+// WorkerStatus worker 状态响应
+type WorkerStatus struct {
+	ActiveTasks int `json:"active_tasks"`
+}
+
 // Worker worker 服务
 type Worker struct {
 	broker   *broker.RabbitMQBroker
@@ -109,4 +114,9 @@ func (w *Worker) Run(ctx context.Context) error {
 // HealthChecker 返回健康检查器
 func (w *Worker) HealthChecker() *health.Health {
 	return w.health
+}
+
+// ActiveTaskCount 返回当前正在处理的任务数量
+func (w *Worker) ActiveTaskCount() int {
+	return w.useCase.ActiveTaskCount()
 }

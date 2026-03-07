@@ -1,0 +1,39 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-prestop-script
+  namespace: cloud-media
+data:
+  prestop.sh: |
+    #!/bin/sh
+    # Worker preStop hook: 等待所有活动任务完成
+    MAX_WAIT=3600  # 最大等待 1 小时（秒）
+    CHECK_INTERVAL=10  # 每 10 秒检查一次
+    ELAPSED=0
+
+    echo "preStop hook started, waiting for tasks to complete..."
+
+    while [ $ELAPSED -lt $MAX_WAIT ]; do
+      # 获取活动任务数
+      ACTIVE_TASKS=$(curl -s http://localhost:8080/status | grep -o '"active_tasks":[0-9]*' | grep -o '[0-9]*')
+
+      if [ $? -ne 0 ]; then
+        echo "Failed to get status, continuing..."
+        ACTIVE_TASKS=0
+      fi
+
+      echo "Active tasks: $ACTIVE_TASKS, elapsed: ${ELAPSED}s"
+
+      if [ "$ACTIVE_TASKS" -eq "0" ]; then
+        echo "No active tasks, ready to terminate"
+        exit 0
+      fi
+
+      sleep $CHECK_INTERVAL
+      ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+    done
+
+    echo "Max wait time reached, forcing termination"
+    exit 0
+
