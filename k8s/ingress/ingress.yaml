@@ -1,0 +1,62 @@
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloud-media-ingress
+  namespace: cloud-media
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    # traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  # tls:
+  #   - hosts:
+  #       - media-api.frozenf1sh.loc
+  #       - media-oss.frozenf1sh.loc
+  #       - media-mq.frozenf1sh.loc
+  #     secretName: cloud-media-tls
+  rules:
+    - host: media-api.frozenf1sh.loc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-server-service
+                port:
+                  number: 8080
+
+    - host: media-oss.frozenf1sh.loc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-service
+                port:
+                  number: 9000
+
+    - host: media-ossctl.frozenf1sh.loc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-service
+                port:
+                  number: 9001
+
+    - host: media-mq.frozenf1sh.loc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rabbitmq-service
+                port:
+                  number: 15672
+
