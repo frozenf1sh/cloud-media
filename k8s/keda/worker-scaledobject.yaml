@@ -1,0 +1,21 @@
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-scaledobject
+  namespace: cloud-media
+spec:
+  scaleTargetRef:
+    name: worker
+  pollingInterval: 5
+  cooldownPeriod: 300
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: video_transcode_tasks
+        queueLength: "5"
+        vhostName: "/"
+      authenticationRef:
+        name: rabbitmq-trigger-auth
