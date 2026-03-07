@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
@@ -95,6 +96,15 @@ func main() {
 		mux := http.NewServeMux()
 		mux.Handle("/health/live", health.LivenessHandler())
 		mux.Handle("/health/ready", worker.HealthChecker().HTTPHandler())
+
+		// 添加状态端点，用于 preStop hook 检查
+		mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			status := WorkerStatus{
+				ActiveTasks: worker.ActiveTaskCount(),
+			}
+			_ = json.NewEncoder(w).Encode(status)
+		})
 
 		addr := cfg.Server.Address()
 		logger.Info("Worker health server starting", logger.String("addr", addr))

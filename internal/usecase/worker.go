@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
@@ -34,11 +35,27 @@ func NewWorkerUseCase(
 	storage domain.ObjectStorage,
 ) *WorkerUseCase {
 	return &WorkerUseCase{
-		repository: repo,
-		transcoder: transcoder,
-		storage:    storage,
-		tempDir:    os.TempDir(),
+		repository:  repo,
+		transcoder:  transcoder,
+		storage:     storage,
+		tempDir:     os.TempDir(),
+		activeTasks: 0,
 	}
+}
+
+// ActiveTaskCount 返回当前正在处理的任务数量
+func (uc *WorkerUseCase) ActiveTaskCount() int {
+	return int(atomic.LoadInt32(&uc.activeTasks))
+}
+
+// incrementActiveTask 增加活动任务计数
+func (uc *WorkerUseCase) incrementActiveTask() {
+	atomic.AddInt32(&uc.activeTasks, 1)
+}
+
+// decrementActiveTask 减少活动任务计数
+func (uc *WorkerUseCase) decrementActiveTask() {
+	atomic.AddInt32(&uc.activeTasks, -1)
 }
 
 // ProcessTask 处理单个视频转码任务
@@ -71,6 +88,10 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 	task = currentTask
 	logger.InfoContext(ctx, "Task successfully transitioned to processing",
 		logger.String("task_id", task.TaskID))
+
+	// 增加活动任务计数
+	uc.incrementActiveTask()
+	defer uc.decrementActiveTask()
 
 	// 创建临时工作目录
 	workDir := filepath.Join(uc.tempDir, "cloud-media", task.TaskID)

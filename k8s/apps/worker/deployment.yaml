@@ -16,6 +16,7 @@ spec:
       labels:
         app: worker
     spec:
+      terminationGracePeriodSeconds: 3600  # 1 小时最大等待时间（一般视频不需要2小时）
       containers:
         - name: worker
           image: ghcr.io/frozenf1sh/cloud-media-worker:latest
@@ -32,6 +33,9 @@ spec:
             - name: config-volume
               mountPath: /app/config.yaml
               subPath: config.yaml
+            - name: prestop-script
+              mountPath: /scripts/prestop.sh
+              subPath: prestop.sh
           resources:
             requests:
               memory: "256Mi"
@@ -39,6 +43,11 @@ spec:
             limits:
               memory: "2Gi"
               cpu: "2000m"
+          lifecycle:
+            preStop:
+              exec:
+                # preStop hook: 检查 /status 端点，等待活动任务完成或超时
+                command: ["/bin/sh", "/scripts/prestop.sh"]
           livenessProbe:
             httpGet:
               path: /health/live
@@ -59,4 +68,8 @@ spec:
         - name: config-volume
           configMap:
             name: cloud-media-common-config
+        - name: prestop-script
+          configMap:
+            name: worker-prestop-script
+            defaultMode: 0755
 
