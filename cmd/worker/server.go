@@ -25,7 +25,20 @@ func NewWorker(
 	b *broker.RabbitMQBroker,
 	uc *usecase.WorkerUseCase,
 	db *persistence.Database,
+	storage domain.ObjectStorage,
 ) *Worker {
+	// 确保必要的 bucket 存在
+	ctx := context.Background()
+	buckets := []string{"media-input", "media-output"}
+	for _, bucket := range buckets {
+		logger.Info("Ensuring bucket exists", logger.String("bucket", bucket))
+		if err := storage.EnsureBucketExists(ctx, bucket); err != nil {
+			logger.Warn("Failed to ensure bucket exists",
+				logger.String("bucket", bucket),
+				logger.Err(err))
+		}
+	}
+
 	// 创建健康检查管理器
 	healthChecker := health.New("worker", "1.0.0")
 

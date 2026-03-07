@@ -125,6 +125,8 @@ type ObjectStorage interface {
 	UploadFromReader(ctx context.Context, bucket, key string, reader io.Reader, size int64) error
 	// DownloadToWriter 下载文件到 io.Writer
 	DownloadToWriter(ctx context.Context, bucket, key string, writer io.Writer) error
+	// EnsureBucketExists 确保存储桶存在，不存在则创建
+	EnsureBucketExists(ctx context.Context, bucket string) error
 }
 
 // TranscodeProgressCallback 转码进度回调函数

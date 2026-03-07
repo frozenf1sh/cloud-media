@@ -42,7 +42,7 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 	}
 	workerUseCase := usecase.NewWorkerUseCase(videoTaskRepository, fFmpegTranscoder, s3CompatStorage)
 	database := persistence.NewDatabase(db)
-	worker := NewWorker(rabbitMQBroker, workerUseCase, database)
+	worker := NewWorker(rabbitMQBroker, workerUseCase, database, s3CompatStorage)
 	return worker, nil
 }
 

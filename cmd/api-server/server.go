@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/frozenf1sh/cloud-media/internal/adapter/rpc"
+	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/pkg/health"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
@@ -20,7 +21,7 @@ type Server struct {
 }
 
 // NewServer 创建服务器
-func NewServer(videoServer *rpc.VideoServer, db *persistence.Database) *Server {
+func NewServer(videoServer *rpc.VideoServer, db *persistence.Database, storage domain.ObjectStorage) *Server {
 	path, handler := v1connect.NewVideoServiceHandler(videoServer)
 
 	// 执行自动迁移
@@ -30,6 +31,18 @@ func NewServer(videoServer *rpc.VideoServer, db *persistence.Database) *Server {
 		panic(err)
 	}
 	logger.Info("Migration completed successfully")
+
+	// 确保必要的 bucket 存在
+	ctx := context.Background()
+	buckets := []string{"media-input", "media-output"}
+	for _, bucket := range buckets {
+		logger.Info("Ensuring bucket exists", logger.String("bucket", bucket))
+		if err := storage.EnsureBucketExists(ctx, bucket); err != nil {
+			logger.Warn("Failed to ensure bucket exists",
+				logger.String("bucket", bucket),
+				logger.Err(err))
+		}
+	}
 
 	// 创建健康检查管理器
 	healthChecker := health.New("api-server", "1.0.0")
