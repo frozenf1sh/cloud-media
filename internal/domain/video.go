@@ -102,6 +102,9 @@ type VideoTaskRepository interface {
 	List(ctx context.Context, page, pageSize int) ([]*VideoTask, int64, error)
 	UpdateStatus(ctx context.Context, taskID string, status VideoTaskStatus, message ...string) error
 	UpdateProgress(ctx context.Context, taskID string, progress int) error
+	// TryTransitionToProcessing 原子性地尝试将任务从 pending/queued 转换为 processing
+	// 返回值: 成功时返回更新后的任务，失败时返回错误
+	TryTransitionToProcessing(ctx context.Context, taskID string) (*VideoTask, error)
 }
 
 // MQBroker 消息队列接口
