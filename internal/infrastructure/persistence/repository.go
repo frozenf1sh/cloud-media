@@ -166,3 +166,61 @@ func (r *videoTaskRepository) UpdateProgress(ctx context.Context, taskID string,
 	}
 	return nil
 }
+
+// TryTransitionToProcessing 原子性地尝试将任务从 pending/queued 转换为 processing
+func (r *videoTaskRepository) TryTransitionToProcessing(ctx context.Context, taskID string) (*domain.VideoTask, error) {
+	var result *domain.VideoTask
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 使用 SELECT ... FOR UPDATE 锁定行，防止并发修改
+		var model VideoTaskModel
+		if err := tx.Raw("SELECT * FROM video_tasks WHERE task_id = ? FOR UPDATE", taskID).Scan(&model).Error; err != nil {
+			return fmt.Errorf("task not found: %w", err)
+		}
+
+		// 2. 检查当前状态，只有 pending/queued 才能转换为 processing
+		currentStatus := domain.VideoTaskStatus(model.Status)
+		if currentStatus == domain.TaskStatusSuccess ||
+			currentStatus == domain.TaskStatusFailed ||
+			currentStatus == domain.TaskStatusCancelled {
+			return fmt.Errorf("task already in terminal state: %s", currentStatus)
+		}
+		if currentStatus == domain.TaskStatusProcessing {
+			return fmt.Errorf("task already being processed")
+		}
+
+		// 3. 更新状态为 processing 并设置 started_at
+		now := tx.NowFunc()
+		updates := map[string]interface{}{
+			"status":     string(domain.TaskStatusProcessing),
+			"started_at": &now,
+		}
+
+		if err := tx.Model(&model).Updates(updates).Error; err != nil {
+			return fmt.Errorf("failed to update task status: %w", err)
+		}
+
+		// 4. 重新加载更新后的模型
+		if err := tx.Where("task_id = ?", taskID).First(&model).Error; err != nil {
+			return fmt.Errorf("failed to reload task: %w", err)
+		}
+
+		// 5. 记录状态变更日志
+		logEntry := TaskStatusLogModel{
+			TaskID:     taskID,
+			FromStatus: string(currentStatus),
+			ToStatus:   string(domain.TaskStatusProcessing),
+			Message:    "transitioned to processing",
+		}
+		if err := tx.Create(&logEntry).Error; err != nil {
+			return fmt.Errorf("failed to create status log: %w", err)
+		}
+
+		result = model.ToDomain()
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

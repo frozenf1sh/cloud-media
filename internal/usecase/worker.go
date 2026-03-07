@@ -20,10 +20,11 @@ var WorkerProviderSet = wire.NewSet(NewWorkerUseCase)
 
 // WorkerUseCase Worker 业务用例
 type WorkerUseCase struct {
-	repository   domain.VideoTaskRepository
-	transcoder   domain.Transcoder
-	storage      domain.ObjectStorage
-	tempDir      string
+	repository     domain.VideoTaskRepository
+	transcoder     domain.Transcoder
+	storage        domain.ObjectStorage
+	tempDir        string
+	activeTasks    int32
 }
 
 // NewWorkerUseCase 创建 WorkerUseCase
@@ -55,45 +56,21 @@ func (uc *WorkerUseCase) ProcessTask(ctx context.Context, task *domain.VideoTask
 		logger.String("task_id", task.TaskID),
 		logger.String("current_status", string(task.Status)))
 
-	// 1. 幂等性检查：从数据库重新加载任务，检查当前状态
-	currentTask, err := uc.repository.GetByTaskID(ctx, task.TaskID)
+	// 1. 原子性状态转换：使用 SELECT FOR UPDATE + 事务保证只有一个 Worker 能处理
+	currentTask, err := uc.repository.TryTransitionToProcessing(ctx, task.TaskID)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
-		metrics.RecordTaskCompleted("failed", time.Since(startTime))
-		return fmt.Errorf("failed to fetch task for idempotency check: %w", err)
-	}
-
-	// 2. 检查任务是否已经处于终态（幂等性保障）
-	if currentTask.Status == domain.TaskStatusSuccess ||
-		currentTask.Status == domain.TaskStatusFailed ||
-		currentTask.Status == domain.TaskStatusCancelled {
-		logger.InfoContext(ctx, "Task already in terminal state, skipping processing",
+		// 状态转换失败，说明任务已经被其他 Worker 处理或已处于终态
+		logger.InfoContext(ctx, "Task cannot be transitioned to processing, skipping",
 			logger.String("task_id", task.TaskID),
-			logger.String("status", string(currentTask.Status)))
+			logger.Err(err))
 		telemetry.SetSpanStatusOK(ctx)
 		return nil
 	}
 
-	// 3. 检查任务是否已经在处理中（防止并发处理）
-	if currentTask.Status == domain.TaskStatusProcessing {
-		logger.WarnContext(ctx, "Task already being processed, skipping",
-			logger.String("task_id", task.TaskID))
-		telemetry.SetSpanStatusOK(ctx)
-		return nil
-	}
-
-	// 4. 更新任务状态为 processing
-	now := time.Now().Unix()
-	task.Status = domain.TaskStatusProcessing
-	task.StartedAt = &now
-	if err := uc.repository.Update(ctx, task); err != nil {
-		logger.ErrorContext(ctx, "Failed to update task status",
-			logger.Err(err),
-			logger.String("task_id", task.TaskID))
-		telemetry.RecordError(ctx, err)
-		metrics.RecordTaskCompleted("failed", time.Since(startTime))
-		return fmt.Errorf("failed to update task status: %w", err)
-	}
+	// 更新 task 引用为最新的数据库状态
+	task = currentTask
+	logger.InfoContext(ctx, "Task successfully transitioned to processing",
+		logger.String("task_id", task.TaskID))
 
 	// 创建临时工作目录
 	workDir := filepath.Join(uc.tempDir, "cloud-media", task.TaskID)
