@@ -78,6 +78,15 @@ func (t *FFmpegTranscoder) Transcode(
 		}
 	}
 
+	// 记录视频原始信息（debug）
+	log.InfoContext(ctx, "Video info for transcoding",
+		logger.Int("original_width", videoInfo.Width),
+		logger.Int("original_height", videoInfo.Height),
+		logger.Int("rotation", videoInfo.Rotation),
+		logger.Float64("duration", videoInfo.Duration),
+		logger.String("codec", videoInfo.Codec),
+	)
+
 	// 创建输出目录
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		telemetry.RecordError(ctx, err)
@@ -91,8 +100,15 @@ func (t *FFmpegTranscoder) Transcode(
 		Variants:       make([]domain.VariantOutput, 0, len(t.cfg.Variants)),
 	}
 
-	// 判断是否是竖屏视频
-	isPortrait := videoInfo.Height > videoInfo.Width
+	// 判断是否是竖屏视频（考虑 rotation）
+	effectiveWidth, effectiveHeight := getEffectiveDimensions(videoInfo.Width, videoInfo.Height, videoInfo.Rotation)
+	isPortrait := effectiveHeight > effectiveWidth
+
+	log.InfoContext(ctx, "Effective video dimensions",
+		logger.Int("effective_width", effectiveWidth),
+		logger.Int("effective_height", effectiveHeight),
+		logger.Bool("is_portrait", isPortrait),
+	)
 
 	// 生成封面
 	thumbnailPath := filepath.Join(outputDir, "thumbnail.jpg")
@@ -113,9 +129,16 @@ func (t *FFmpegTranscoder) Transcode(
 
 	// 转码每个变体
 	for i, variant := range t.cfg.Variants {
-		// 计算保持宽高比的分辨率
-		scaleWidth, scaleHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, variant.TargetSize)
+		// 计算保持宽高比的分辨率（考虑 rotation）
+		scaleWidth, scaleHeight := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, variant.TargetSize, videoInfo.Rotation)
 		resolutionStr := fmt.Sprintf("%dx%d", scaleWidth, scaleHeight)
+
+		log.InfoContext(ctx, "Calculated variant dimensions",
+			logger.String("variant", variant.Name),
+			logger.Int("target_size", variant.TargetSize),
+			logger.Int("output_width", scaleWidth),
+			logger.Int("output_height", scaleHeight),
+		)
 
 		variantDir := filepath.Join(outputDir, variant.Name)
 		if err := os.MkdirAll(variantDir, 0755); err != nil {
@@ -136,7 +159,7 @@ func (t *FFmpegTranscoder) Transcode(
 		}
 
 		// 执行转码
-		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.Bitrate, videoInfo, variantCallback); err != nil {
+		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.TargetSize, variant.Bitrate, videoInfo, variantCallback); err != nil {
 			telemetry.RecordError(ctx, err)
 			return nil, fmt.Errorf("failed to transcode %s: %w", variant.Name, err)
 		}
@@ -176,6 +199,14 @@ func (t *FFmpegTranscoder) Transcode(
 	return outputInfo, nil
 }
 
+// getEffectiveDimensions 获取考虑 rotation 后的有效宽高
+func getEffectiveDimensions(width, height, rotation int) (int, int) {
+	if rotation == 90 || rotation == 270 || rotation == -90 || rotation == -270 {
+		return height, width
+	}
+	return width, height
+}
+
 // transcodeVariant 转码单个码率变体
 func (t *FFmpegTranscoder) transcodeVariant(
 	ctx context.Context,
@@ -184,13 +215,16 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	segmentPattern string,
 	width int,
 	height int,
+	targetSize int,
 	bitrate string,
 	videoInfo *domain.VideoInfo,
 	onProgress domain.TranscodeProgressCallback,
 ) error {
 	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.transcodeVariant",
 		telemetry.String("resolution", fmt.Sprintf("%dx%d", width, height)),
+		telemetry.Int("target_size", targetSize),
 		telemetry.String("bitrate", bitrate),
+		telemetry.Int("rotation", videoInfo.Rotation),
 	)
 	defer span.End()
 
@@ -209,12 +243,35 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	scaleFilter := t.scaleCalculator.ScaleFilter(width, height)
+	// 构建视频滤镜链：先旋转（如果需要），再缩放
+	// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
+	var filters []string
+	switch videoInfo.Rotation {
+	case 90, -270:
+		// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
+		filters = append(filters, "transpose=2")
+	case 180, -180:
+		// 旋转180度
+		filters = append(filters, "transpose=1,transpose=1")
+	case 270, -90:
+		// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
+		filters = append(filters, "transpose=1")
+	}
+	filters = append(filters, fmt.Sprintf("scale=%d:%d:flags=lanczos,setsar=1:1", width, height))
+	vfFilter := strings.Join(filters, ",")
+
+	log.InfoContext(ctx, "FFmpeg transcoding parameters",
+		logger.Int("output_width", width),
+		logger.Int("output_height", height),
+		logger.String("vf_filter", vfFilter),
+		logger.String("bitrate", bitrate),
+	)
 
 	args := []string{
 		"-y",
+		"-noautorotate", // 禁用自动旋转，使用手动旋转
 		"-i", inputPath,
-		"-vf", scaleFilter,
+		"-vf", vfFilter,
 		"-c:v", t.cfg.VideoCodec,
 		"-b:v", bitrate,
 		"-preset", t.cfg.Preset,
@@ -269,8 +326,8 @@ func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain
 	sb.WriteString("#EXT-X-VERSION:3\n")
 
 	for i, variant := range variants {
-		// 计算该变体的实际分辨率
-		width, height := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, t.cfg.Variants[i].TargetSize)
+		// 计算该变体的实际分辨率（考虑 rotation）
+		width, height := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, t.cfg.Variants[i].TargetSize, videoInfo.Rotation)
 		sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n",
 			variant.Bandwidth, width, height))
 		sb.WriteString(fmt.Sprintf("%s/index.m3u8\n", t.cfg.Variants[i].Name))
@@ -296,6 +353,7 @@ func (t *FFmpegTranscoder) GetVideoInfo(ctx context.Context, inputPath string) (
 		Duration:   ffmpegVideoInfo.Duration,
 		Width:      ffmpegVideoInfo.Width,
 		Height:     ffmpegVideoInfo.Height,
+		Rotation:   ffmpegVideoInfo.Rotation,
 		Codec:      ffmpegVideoInfo.Codec,
 		Bitrate:    ffmpegVideoInfo.Bitrate,
 		FPS:        ffmpegVideoInfo.FPS,
@@ -309,26 +367,57 @@ func (t *FFmpegTranscoder) GenerateThumbnail(ctx context.Context, inputPath stri
 	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.GenerateThumbnail")
 	defer span.End()
 
+	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
+
 	var args []string
 
 	if videoInfo != nil && videoInfo.Width > 0 && videoInfo.Height > 0 {
-		// 计算封面缩放后的尺寸
-		thumbWidth, thumbHeight := t.scaleCalculator.Calculate(videoInfo.Width, videoInfo.Height, t.cfg.ThumbnailSize)
-		scaleFilter := t.scaleCalculator.ScaleFilter(thumbWidth, thumbHeight)
+		// 计算封面缩放后的尺寸（考虑 rotation）
+		thumbWidth, thumbHeight := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, t.cfg.ThumbnailSize, videoInfo.Rotation)
+
+		// 构建视频滤镜链：先旋转（如果需要），再缩放
+		// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
+		var filters []string
+		switch videoInfo.Rotation {
+		case 90, -270:
+			// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
+			filters = append(filters, "transpose=2")
+		case 180, -180:
+			// 旋转180度
+			filters = append(filters, "transpose=1,transpose=1")
+		case 270, -90:
+			// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
+			filters = append(filters, "transpose=1")
+		}
+		filters = append(filters, fmt.Sprintf("scale=%d:%d:flags=lanczos,setsar=1:1", thumbWidth, thumbHeight))
+		vfFilter := strings.Join(filters, ",")
+
+		// 记录缩略图生成参数（debug）
+		log.InfoContext(ctx, "Generating thumbnail with parameters",
+			logger.Int("original_width", videoInfo.Width),
+			logger.Int("original_height", videoInfo.Height),
+			logger.Int("rotation", videoInfo.Rotation),
+			logger.Int("thumb_width", thumbWidth),
+			logger.Int("thumb_height", thumbHeight),
+			logger.String("vf_filter", vfFilter),
+		)
 
 		args = []string{
 			"-y",
+			"-noautorotate", // 禁用自动旋转
 			"-ss", fmt.Sprintf("%.2f", timeOffset),
 			"-i", inputPath,
-			"-vf", scaleFilter,
+			"-vf", vfFilter,
 			"-vframes", "1",
 			"-q:v", "2",
 			outputPath,
 		}
 	} else {
-		// 没有视频信息时使用原始尺寸
+		log.InfoContext(ctx, "Generating thumbnail without video info")
+		// 没有视频信息时直接提取一帧
 		args = []string{
 			"-y",
+			"-noautorotate",
 			"-ss", fmt.Sprintf("%.2f", timeOffset),
 			"-i", inputPath,
 			"-vframes", "1",

@@ -26,9 +26,13 @@ var ProviderSet = wire.NewSet(
 
 // S3CompatStorage S3 兼容对象存储实现（支持 MinIO、AWS S3、Cloudflare R2）
 type S3CompatStorage struct {
-	coreClient   *minio.Client // 内网客户端：用于上传、下载、管理
-	signerClient *minio.Client // 外网客户端：仅用于生成预签名 URL
-	cdnConfig    config.CDNConfig
+	coreClient         *minio.Client // 内网客户端：用于上传、下载、管理
+	signerClient       *minio.Client // 外网客户端：仅用于生成预签名 URL
+	cdnConfig          config.CDNConfig
+	internalEndpoint   string
+	internalUseSSL     bool
+	externalEndpoint   string
+	externalUseSSL     bool
 }
 
 // NewS3CompatStorage 创建 S3 兼容存储实例
@@ -74,9 +78,13 @@ func NewS3CompatStorage(cfg *config.ObjectStorageConfig) (*S3CompatStorage, erro
 	logger.Debug("Signer storage client created", logger.String("endpoint", cfg.ExternalEndpoint))
 
 	return &S3CompatStorage{
-		coreClient:   coreClient,
-		signerClient: signerClient,
-		cdnConfig:    cfg.CDN,
+		coreClient:       coreClient,
+		signerClient:     signerClient,
+		cdnConfig:        cfg.CDN,
+		internalEndpoint: cfg.InternalEndpoint,
+		internalUseSSL:   cfg.InternalUseSSL,
+		externalEndpoint: cfg.ExternalEndpoint,
+		externalUseSSL:   cfg.ExternalUseSSL,
 	}, nil
 }
 
@@ -273,4 +281,34 @@ func (s *S3CompatStorage) buildCDNURL(bucket, key string) string {
 	// CDN URL 格式: {cdn_base_url}/{bucket}/{key}
 	// 注意：实际生产中可能需要根据 CDN 提供商调整路径格式
 	return fmt.Sprintf("%s/%s", s.cdnConfig.BaseURL, path.Join(bucket, key))
+}
+
+// GetPublicURL 获取公开访问 URL（桶已公开读时使用）
+func (s *S3CompatStorage) GetPublicURL(ctx context.Context, bucket, key string) (string, error) {
+	logger.DebugContext(ctx, "Generating public URL",
+		logger.String("bucket", bucket),
+		logger.String("key", key),
+	)
+
+	// 如果启用了 CDN，直接返回 CDN URL
+	if s.cdnConfig.Enabled {
+		cdnURL := s.buildCDNURL(bucket, key)
+		logger.DebugContext(ctx, "Using CDN URL for public access", logger.String("url", cdnURL))
+		return cdnURL, nil
+	}
+
+	// 否则构建公开 URL: {scheme}://{external_endpoint}/{bucket}/{key}
+	scheme := "http"
+	if s.externalUseSSL {
+		scheme = "https"
+	}
+
+	host := s.externalEndpoint
+	if host == "" {
+		host = "localhost:9000"
+	}
+
+	publicURL := fmt.Sprintf("%s://%s/%s", scheme, host, path.Join(bucket, key))
+	logger.DebugContext(ctx, "Public URL generated", logger.String("url", publicURL))
+	return publicURL, nil
 }

@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
@@ -30,8 +31,14 @@ func (f *FFmpeg) Command(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, f.path, args...)
 }
 
-// Run 执行 FFmpeg 命令
+// Run 执行 FFmpeg 命令，捕获 stderr 用于调试
 func (f *FFmpeg) Run(ctx context.Context, args ...string) error {
 	cmd := f.Command(ctx, args...)
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	return nil
 }

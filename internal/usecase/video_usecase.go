@@ -155,17 +155,17 @@ func (uc *VideoUseCase) GetPlaybackURLs(ctx context.Context, task *domain.VideoT
 		return "", "", nil
 	}
 
-	// 生成播放列表 URL（预签名 7 天）
+	// 使用公开 URL（桶已公开读）
 	if task.OutputInfo.PlaylistPath != "" && task.OutputInfo.OutputBucket != "" {
-		playlistURL, err = uc.storage.GetPresignedURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.PlaylistPath, "GET", 604800)
+		playlistURL, err = uc.storage.GetPublicURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.PlaylistPath)
 		if err != nil {
 			logger.WarnContext(ctx, "Failed to generate playlist URL", logger.Err(err))
 		}
 	}
 
-	// 生成缩略图 URL（预签名 7 天）
+	// 使用公开 URL（桶已公开读）
 	if task.OutputInfo.ThumbnailPath != "" && task.OutputInfo.OutputBucket != "" {
-		thumbnailURL, err = uc.storage.GetPresignedURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.ThumbnailPath, "GET", 604800)
+		thumbnailURL, err = uc.storage.GetPublicURL(ctx, task.OutputInfo.OutputBucket, task.OutputInfo.ThumbnailPath)
 		if err != nil {
 			logger.WarnContext(ctx, "Failed to generate thumbnail URL", logger.Err(err))
 		}

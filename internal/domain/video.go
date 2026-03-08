@@ -120,6 +120,8 @@ type ObjectStorage interface {
 	DownloadFile(ctx context.Context, bucket, key string) ([]byte, error)
 	// GetPresignedURL 获取预签名 URL（用于分片上传/下载）
 	GetPresignedURL(ctx context.Context, bucket, key string, method string, expiry int64) (string, error)
+	// GetPublicURL 获取公开访问 URL（桶已公开读时使用）
+	GetPublicURL(ctx context.Context, bucket, key string) (string, error)
 	// ListObjects 列出存储桶中的对象
 	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
 	// DeleteObject 删除对象
@@ -165,6 +167,7 @@ type VideoInfo struct {
 	Duration  float64 // 时长（秒）
 	Width     int     // 宽度
 	Height    int     // 高度
+	Rotation  int     // 旋转角度（0, 90, 180, 270）
 	Codec     string  // 视频编码
 	Bitrate   int64   // 码率（bps）
 	FPS       float64 // 帧率

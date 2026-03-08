@@ -1,5 +1,8 @@
 #!/bin/bash
 
+kubectl delete -k k8s/apps
+sudo k3s crictl rmi --prune
+
 # 1. 定义前缀和镜像映射 (格式: 镜像名:构建目标)
 REGISTRY="ghcr.io/frozenf1sh"
 APPS=("cloud-media-worker:worker" "cloud-media-api-server:api-server")
@@ -26,5 +29,7 @@ for ITEM in "${APPS[@]}"; do
   echo "✅ $BASE_NAME 已就绪"
   echo "-----------------------------------"
 done
+
+kb apply -k k8s/apps
 
 echo "🚀 所有镜像已成功导入 K3s！"
