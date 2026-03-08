@@ -1,0 +1,55 @@
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otelcol-agent
+  namespace: cloud-media
+spec:
+  selector:
+    matchLabels:
+      app: otelcol-agent
+  template:
+    metadata:
+      labels:
+        app: otelcol-agent
+    spec:
+      serviceAccountName: otelcol-agent
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.103.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/otelcol/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              hostPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+              hostPort: 4318
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          configMap:
+            name: otelcol-agent-config
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers

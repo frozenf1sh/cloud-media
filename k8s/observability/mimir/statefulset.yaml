@@ -1,0 +1,74 @@
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mimir
+  namespace: cloud-media
+spec:
+  serviceName: mimir-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+    spec:
+      containers:
+        - name: mimir
+          image: grafana/mimir:2.11.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/mimir/mimir.yaml
+            - -config.expand-env=true
+          env:
+            # 从 Secret 读取 MinIO 凭证
+            - name: MINIO_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ACCESS_KEY_ID
+            - name: MINIO_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_SECRET_ACCESS_KEY
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: memberlist
+              containerPort: 7946
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mimir
+            - name: storage
+              mountPath: /data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: mimir-config
+        - name: storage
+          persistentVolumeClaim:
+            claimName: mimir-pvc
