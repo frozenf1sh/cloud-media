@@ -29,6 +29,34 @@ spec:
             # 通过环境变量覆盖 service_name
             - name: CLOUD_MEDIA_OBSERVABILITY_SERVICE_NAME
               value: "cloud-media-worker"
+            # 从 Secret 读取数据库凭证
+            - name: CLOUD_MEDIA_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-media-secret
+                  key: CLOUD_MEDIA_DATABASE_USER
+            - name: CLOUD_MEDIA_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-media-secret
+                  key: CLOUD_MEDIA_DATABASE_PASSWORD
+            # 从 Secret 读取 RabbitMQ 连接串
+            - name: CLOUD_MEDIA_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-media-secret
+                  key: CLOUD_MEDIA_RABBITMQ_URL
+            # 从 Secret 读取对象存储凭证
+            - name: CLOUD_MEDIA_OBJECT_STORAGE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-media-secret
+                  key: CLOUD_MEDIA_OBJECT_STORAGE_ACCESS_KEY_ID
+            - name: CLOUD_MEDIA_OBJECT_STORAGE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-media-secret
+                  key: CLOUD_MEDIA_OBJECT_STORAGE_SECRET_ACCESS_KEY
           volumeMounts:
             - name: config-volume
               mountPath: /app/config.yaml

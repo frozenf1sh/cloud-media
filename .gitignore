@@ -44,3 +44,9 @@ bin/
 
 # E2E test output
 test_result.html
+
+# Sealed Secrets - 未加密的 Secret 和私钥
+secrets.unsealed.yaml
+k8s/**/secrets.unsealed.yaml
+sealed-secrets-private-key.yaml
+sealed-secrets-private-key.backup.yaml

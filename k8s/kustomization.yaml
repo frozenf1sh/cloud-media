@@ -1,0 +1,17 @@
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cloud-media
+resources:
+  # 1. 首先创建命名空间
+  - namespace.yaml
+  # 2. 基础组件（PostgreSQL、RabbitMQ、MinIO）- 应用依赖这些
+  - base
+  # 3. 可观测性组件（Loki、Tempo、Mimir、Grafana、OTel Collector）
+  - observability
+  # 4. 应用（API Server、Worker）
+  - apps
+  # 5. Ingress（依赖应用服务）
+  - ingress
+  # 6. KEDA（依赖 Worker Deployment 和 RabbitMQ）
+  - keda
