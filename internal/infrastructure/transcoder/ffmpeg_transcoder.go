@@ -115,23 +115,41 @@ func (t *FFmpegTranscoder) Transcode(
 	if err := t.GenerateThumbnail(ctx, inputPath, thumbnailPath, 1.0, videoInfo); err == nil {
 		outputInfo.ThumbnailPath = filepath.Join(outputBasePath, "thumbnail.jpg")
 		log.InfoContext(ctx, "Generated thumbnail", logger.String("path", thumbnailPath))
+		if onProgress != nil {
+			onProgress(10, "Thumbnail generated")
+		}
 	} else {
 		log.WarnContext(ctx, "Failed to generate thumbnail", logger.Err(err))
 		telemetry.RecordError(ctx, err)
 	}
 
-	// 计算进度权重
+	// 检查是否配置了变体
 	numVariants := len(t.cfg.Variants)
 	if numVariants == 0 {
 		return nil, fmt.Errorf("no transcoding variants configured")
 	}
-	variantProgressWeight := 90 / numVariants // 封面占 10%，变体共享 90%
 
-	// 转码每个变体
-	for i, variant := range t.cfg.Variants {
-		// 计算保持宽高比的分辨率（考虑 rotation）
+	// 准备变体输出信息和目录
+	variantConfigs := make([]variantOutputConfig, 0, numVariants)
+	for _, variant := range t.cfg.Variants {
 		scaleWidth, scaleHeight := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, variant.TargetSize, videoInfo.Rotation)
-		resolutionStr := fmt.Sprintf("%dx%d", scaleWidth, scaleHeight)
+		variantDir := filepath.Join(outputDir, variant.Name)
+
+		if err := os.MkdirAll(variantDir, 0755); err != nil {
+			telemetry.RecordError(ctx, err)
+			return nil, fmt.Errorf("failed to create variant dir: %w", err)
+		}
+
+		variantConfigs = append(variantConfigs, variantOutputConfig{
+			variant:         variant,
+			width:           scaleWidth,
+			height:          scaleHeight,
+			variantDir:      variantDir,
+			playlistPath:    filepath.Join(variantDir, "index.m3u8"),
+			segmentPattern:  filepath.Join(variantDir, "segment_%04d.ts"),
+			outputBasePath:  outputBasePath,
+			isPortrait:      isPortrait,
+		})
 
 		log.InfoContext(ctx, "Calculated variant dimensions",
 			logger.String("variant", variant.Name),
@@ -139,45 +157,37 @@ func (t *FFmpegTranscoder) Transcode(
 			logger.Int("output_width", scaleWidth),
 			logger.Int("output_height", scaleHeight),
 		)
+	}
 
-		variantDir := filepath.Join(outputDir, variant.Name)
-		if err := os.MkdirAll(variantDir, 0755); err != nil {
-			telemetry.RecordError(ctx, err)
-			return nil, fmt.Errorf("failed to create variant dir: %w", err)
+	// 构建进度回调：封面10%，转码90%
+	progressCallback := func(progress int, message string) {
+		if onProgress != nil {
+			totalProgress := 10 + (progress * 90 / 100)
+			onProgress(totalProgress, message)
 		}
+	}
 
-		playlistPath := filepath.Join(variantDir, "index.m3u8")
-		segmentPattern := filepath.Join(variantDir, "segment_%04d.ts")
+	// 一次性转码所有变体（单进程多路输出）
+	if err := t.transcodeAllVariants(ctx, inputPath, videoInfo, variantConfigs, progressCallback); err != nil {
+		telemetry.RecordError(ctx, err)
+		return nil, fmt.Errorf("failed to transcode variants: %w", err)
+	}
 
-		// 计算进度
-		progressOffset := 10 + i*variantProgressWeight
-		variantCallback := func(progress int, message string) {
-			if onProgress != nil {
-				totalProgress := progressOffset + (progress * variantProgressWeight / 100)
-				onProgress(totalProgress, message)
-			}
-		}
-
-		// 执行转码
-		if err := t.transcodeVariant(ctx, inputPath, playlistPath, segmentPattern, scaleWidth, scaleHeight, variant.TargetSize, variant.Bitrate, videoInfo, variantCallback); err != nil {
-			telemetry.RecordError(ctx, err)
-			return nil, fmt.Errorf("failed to transcode %s: %w", variant.Name, err)
-		}
-
-		metrics.RecordTranscodedVideo(variant.Name)
-
-		// 记录变体信息
-		variantResolution := resolutionStr
-		if isPortrait {
-			variantResolution = fmt.Sprintf("%dp (portrait)", variant.TargetSize)
+	// 记录变体信息到 outputInfo
+	for _, vc := range variantConfigs {
+		var variantResolution string
+		if vc.isPortrait {
+			variantResolution = fmt.Sprintf("%dp (portrait)", vc.variant.TargetSize)
 		} else {
-			variantResolution = fmt.Sprintf("%dp", variant.TargetSize)
+			variantResolution = fmt.Sprintf("%dp", vc.variant.TargetSize)
 		}
 		outputInfo.Variants = append(outputInfo.Variants, domain.VariantOutput{
 			Resolution:   variantResolution,
-			PlaylistPath: filepath.Join(outputBasePath, variant.Name, "index.m3u8"),
-			Bandwidth:    variant.Bandwidth,
+			PlaylistPath: filepath.Join(vc.outputBasePath, vc.variant.Name, "index.m3u8"),
+			Bandwidth:    vc.variant.Bandwidth,
 		})
+
+		metrics.RecordTranscodedVideo(vc.variant.Name)
 	}
 
 	// 生成主播放列表
@@ -199,38 +209,34 @@ func (t *FFmpegTranscoder) Transcode(
 	return outputInfo, nil
 }
 
-// getEffectiveDimensions 获取考虑 rotation 后的有效宽高
-func getEffectiveDimensions(width, height, rotation int) (int, int) {
-	if rotation == 90 || rotation == 270 || rotation == -90 || rotation == -270 {
-		return height, width
-	}
-	return width, height
+// variantOutputConfig 单个变体的输出配置
+type variantOutputConfig struct {
+	variant        config.TranscoderVariantConfig
+	width          int
+	height         int
+	variantDir     string
+	playlistPath   string
+	segmentPattern string
+	outputBasePath string
+	isPortrait     bool
 }
 
-// transcodeVariant 转码单个码率变体
-func (t *FFmpegTranscoder) transcodeVariant(
+// transcodeAllVariants 使用单进程多路输出转码所有变体
+func (t *FFmpegTranscoder) transcodeAllVariants(
 	ctx context.Context,
 	inputPath string,
-	playlistPath string,
-	segmentPattern string,
-	width int,
-	height int,
-	targetSize int,
-	bitrate string,
 	videoInfo *domain.VideoInfo,
+	variantConfigs []variantOutputConfig,
 	onProgress domain.TranscodeProgressCallback,
 ) error {
-	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.transcodeVariant",
-		telemetry.String("resolution", fmt.Sprintf("%dx%d", width, height)),
-		telemetry.Int("target_size", targetSize),
-		telemetry.String("bitrate", bitrate),
-		telemetry.Int("rotation", videoInfo.Rotation),
+	ctx, span := telemetry.StartSpan(ctx, "FFmpegTranscoder.transcodeAllVariants",
+		telemetry.Int("num_variants", len(variantConfigs)),
 	)
 	defer span.End()
 
 	log := slog.With(logger.String("trace_id", telemetry.TraceIDFromContext(ctx)))
 
-	// 计算超时时间
+	// 计算超时时间（复用原逻辑）
 	timeout := time.Duration(videoInfo.Duration*t.cfg.TimeoutMultiplier) * time.Second
 	if timeout < time.Duration(t.cfg.MinTimeout)*time.Minute {
 		timeout = time.Duration(t.cfg.MinTimeout) * time.Minute
@@ -243,49 +249,37 @@ func (t *FFmpegTranscoder) transcodeVariant(
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// 构建视频滤镜链：先旋转（如果需要），再缩放
-	// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
-	var filters []string
-	switch videoInfo.Rotation {
-	case 90, -270:
-		// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
-		filters = append(filters, "transpose=2")
-	case 180, -180:
-		// 旋转180度
-		filters = append(filters, "transpose=1,transpose=1")
-	case 270, -90:
-		// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
-		filters = append(filters, "transpose=1")
+	// 构建 filtergraph
+	filtergraph, outputLabels, err := t.buildFiltergraph(videoInfo, variantConfigs)
+	if err != nil {
+		telemetry.RecordError(ctx, err)
+		return fmt.Errorf("failed to build filtergraph: %w", err)
 	}
-	filters = append(filters, fmt.Sprintf("scale=%d:%d:flags=lanczos,setsar=1:1", width, height))
-	vfFilter := strings.Join(filters, ",")
 
-	log.InfoContext(ctx, "FFmpeg transcoding parameters",
-		logger.Int("output_width", width),
-		logger.Int("output_height", height),
-		logger.String("vf_filter", vfFilter),
-		logger.String("bitrate", bitrate),
+	log.InfoContext(ctx, "Built filtergraph",
+		logger.String("filtergraph", filtergraph),
+		logger.Int("num_outputs", len(outputLabels)),
 	)
 
+	// 构建完整命令参数
 	args := []string{
 		"-y",
-		"-noautorotate", // 禁用自动旋转，使用手动旋转
+		"-noautorotate",
 		"-i", inputPath,
-		"-vf", vfFilter,
-		"-c:v", t.cfg.VideoCodec,
-		"-b:v", bitrate,
-		"-preset", t.cfg.Preset,
-		"-g", fmt.Sprintf("%d", t.cfg.GOPSize),
-		"-sc_threshold", "0",
-		"-c:a", t.cfg.AudioCodec,
-		"-b:a", t.cfg.AudioBitrate,
-		"-f", "hls",
-		"-hls_time", fmt.Sprintf("%d", t.cfg.HLSTime),
-		"-hls_list_size", "0",
-		"-hls_segment_filename", segmentPattern,
-		playlistPath,
+		"-filter_complex", filtergraph,
 	}
 
+	// 添加每个输出的参数
+	for i, vc := range variantConfigs {
+		outputArgs := t.buildOutputArgs(vc, outputLabels[i])
+		args = append(args, outputArgs...)
+	}
+
+	log.InfoContext(ctx, "FFmpeg multi-output command",
+		logger.Int("num_args", len(args)),
+	)
+
+	// 执行命令
 	cmd := t.ffmpeg.Command(timeoutCtx, args...)
 
 	stderr, err := cmd.StderrPipe()
@@ -311,11 +305,90 @@ func (t *FFmpegTranscoder) transcodeVariant(
 		return fmt.Errorf("ffmpeg failed: %w", err)
 	}
 
-	log.InfoContext(ctx, "Variant transcoded",
-		logger.String("resolution", fmt.Sprintf("%dx%d", width, height)),
-		logger.String("bitrate", bitrate),
-	)
+	log.InfoContext(ctx, "All variants transcoded successfully")
 	return nil
+}
+
+// buildFiltergraph 构建复杂滤镜图
+// 返回: filtergraph 字符串、各变体的输出标签名
+func (t *FFmpegTranscoder) buildFiltergraph(
+	videoInfo *domain.VideoInfo,
+	variantConfigs []variantOutputConfig,
+) (string, []string, error) {
+	numVariants := len(variantConfigs)
+	if numVariants == 0 {
+		return "", nil, fmt.Errorf("no variants provided")
+	}
+
+	var parts []string
+
+	// 第一步：构建输入处理链（旋转 + split）
+	var inputFilters []string
+
+	// 添加旋转滤镜（如需要）
+	// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
+	switch videoInfo.Rotation {
+	case 90, -270:
+		// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
+		inputFilters = append(inputFilters, "transpose=2")
+	case 180, -180:
+		// 旋转180度
+		inputFilters = append(inputFilters, "transpose=1,transpose=1")
+	case 270, -90:
+		// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
+		inputFilters = append(inputFilters, "transpose=1")
+	}
+
+	// 添加 split 滤镜
+	splitLabels := make([]string, numVariants)
+	for i := 0; i < numVariants; i++ {
+		splitLabels[i] = fmt.Sprintf("v%d", i+1)
+	}
+	inputFilters = append(inputFilters, fmt.Sprintf("split=%d%s", numVariants, strings.Join(splitLabels, "")))
+
+	parts = append(parts, fmt.Sprintf("[0:v]%s", strings.Join(inputFilters, ",")))
+
+	// 第二步：为每个变体添加缩放链
+	outputLabels := make([]string, numVariants)
+	for i, vc := range variantConfigs {
+		outputLabels[i] = fmt.Sprintf("out%d", i+1)
+		parts = append(parts, fmt.Sprintf("[%s]scale=%d:%d:flags=lanczos,setsar=1:1[%s]",
+			splitLabels[i], vc.width, vc.height, outputLabels[i]))
+	}
+
+	// 组合完整 filtergraph
+	return strings.Join(parts, ";"), outputLabels, nil
+}
+
+// buildOutputArgs 构建单个输出的参数
+func (t *FFmpegTranscoder) buildOutputArgs(
+	vc variantOutputConfig,
+	outputLabel string,
+) []string {
+	return []string{
+		"-map", fmt.Sprintf("[%s]", outputLabel),
+		"-map", "0:a",
+		"-c:v", t.cfg.VideoCodec,
+		"-b:v", vc.variant.Bitrate,
+		"-preset", t.cfg.Preset,
+		"-g", fmt.Sprintf("%d", t.cfg.GOPSize),
+		"-sc_threshold", "0",
+		"-c:a", t.cfg.AudioCodec,
+		"-b:a", t.cfg.AudioBitrate,
+		"-f", "hls",
+		"-hls_time", fmt.Sprintf("%d", t.cfg.HLSTime),
+		"-hls_list_size", "0",
+		"-hls_segment_filename", vc.segmentPattern,
+		vc.playlistPath,
+	}
+}
+
+// getEffectiveDimensions 获取考虑 rotation 后的有效宽高
+func getEffectiveDimensions(width, height, rotation int) (int, int) {
+	if rotation == 90 || rotation == 270 || rotation == -90 || rotation == -270 {
+		return height, width
+	}
+	return width, height
 }
 
 // generateMasterPlaylist 生成 HLS 主播放列表
