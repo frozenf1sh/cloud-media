@@ -366,7 +366,7 @@ func (t *FFmpegTranscoder) buildFiltergraph(
 	// 添加 split 滤镜
 	splitLabels := make([]string, numVariants)
 	for i := 0; i < numVariants; i++ {
-		splitLabels[i] = fmt.Sprintf("v%d", i+1)
+		splitLabels[i] = fmt.Sprintf("[v%d]", i+1)
 	}
 	parts = append(parts, fmt.Sprintf("[%s]split=%d%s", currentInputLabel, numVariants, strings.Join(splitLabels, "")))
 
@@ -374,7 +374,7 @@ func (t *FFmpegTranscoder) buildFiltergraph(
 	outputLabels := make([]string, numVariants)
 	for i, vc := range variantConfigs {
 		outputLabels[i] = fmt.Sprintf("out%d", i+1)
-		parts = append(parts, fmt.Sprintf("[%s]scale=%d:%d:flags=lanczos,setsar=1:1[%s]",
+		parts = append(parts, fmt.Sprintf("%sscale=%d:%d:flags=lanczos,setsar=1:1[%s]",
 			splitLabels[i], vc.width, vc.height, outputLabels[i]))
 	}
 
