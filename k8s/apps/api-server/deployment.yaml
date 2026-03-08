@@ -67,22 +67,24 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "1000m"
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            failureThreshold: 30    # 最多给 30 次机会
+            periodSeconds: 1        # 每秒查一次，起得快就秒过，起得慢（如 DB 还没好）就死等
           livenessProbe:
             httpGet:
               path: /health/live
               port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0  # 已经被 StartupProbe 保护了
             periodSeconds: 20
-            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 3
+            initialDelaySeconds: 0
+            periodSeconds: 5
       volumes:
         - name: config-volume
           configMap:

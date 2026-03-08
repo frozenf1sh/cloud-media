@@ -7,7 +7,7 @@ metadata:
   labels:
     app: worker
 spec:
-  replicas: 2
+  replicas: 0
   selector:
     matchLabels:
       app: worker
@@ -76,22 +76,34 @@ spec:
               exec:
                 # preStop hook: 检查 /status 端点，等待活动任务完成或超时
                 command: ["/bin/sh", "/scripts/prestop.sh"]
-          livenessProbe:
+          # 启动探针
+          startupProbe:
             httpGet:
-              path: /health/live
+              path: /health/ready
               port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 10
+            initialDelaySeconds: 1 
+            periodSeconds: 1
+            failureThreshold: 30
+          # 就绪探针
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 20
+            # 因为有了 startupProbe，这里不需要 initialDelay
+            initialDelaySeconds: 0 
+            periodSeconds: 2
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          # 存活探针
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 0
             periodSeconds: 15
             timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: config-volume
           configMap:
