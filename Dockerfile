@@ -46,9 +46,6 @@ WORKDIR /app
 # 从 builder 阶段复制二进制文件
 COPY --from=builder /app/bin/api-server .
 
-# 复制配置文件示例
-COPY config/config.api-server.example.yaml ./config.yaml
-
 # 暴露端口
 EXPOSE 8080
 
@@ -65,9 +62,6 @@ WORKDIR /app
 
 # 从 builder 阶段复制二进制文件
 COPY --from=builder /app/bin/worker .
-
-# 复制配置文件示例
-COPY config/config.worker.example.yaml ./config.yaml
 
 # 运行
 ENTRYPOINT ["/app/worker"]
