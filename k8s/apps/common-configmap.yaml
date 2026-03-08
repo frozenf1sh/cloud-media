@@ -37,7 +37,7 @@ data:
       video_codec: "libx264"
       audio_codec: "aac"
       audio_bitrate: "128k"
-      preset: "fast"
+      preset: "superfast"
       gop_size: 48
       thumbnail_size: 1080
       timeout_multiplier: 3.0

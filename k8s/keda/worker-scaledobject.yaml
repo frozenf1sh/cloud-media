@@ -9,7 +9,7 @@ spec:
   pollingInterval: 5            # 优化：缩短轮询间隔，让扩容反应更快（默认30s，视频处理建议更敏捷）
   cooldownPeriod: 60            # 优化：缩短 KEDA 自身的冷却时间，依赖 HPA 的稳定窗口控制
   minReplicaCount: 0            # 允许缩容到 0
-  maxReplicaCount: 6            # 根据你的资源配额设定
+  maxReplicaCount: 5            # 根据你的资源配额设定
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
@@ -17,7 +17,7 @@ spec:
           stabilizationWindowSeconds: 0 # 激进扩容：有任务立刻起 Pod
           policies:
           - type: Pods
-            value: 6                   # 允许一次性扩容较多 Pod，避免积压
+            value: 5                   # 允许一次性扩容较多 Pod，避免积压
             periodSeconds: 10
         scaleDown:
           stabilizationWindowSeconds: 300 # 缩容稳定窗口：空闲 5 分钟后再开始缩容（防止网络波动导致反复重启）
