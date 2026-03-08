@@ -275,8 +275,10 @@ func (t *FFmpegTranscoder) transcodeAllVariants(
 		args = append(args, outputArgs...)
 	}
 
+	// 记录完整的 FFmpeg 命令用于调试
+	cmdStr := formatFFmpegCommand(args)
 	log.InfoContext(ctx, "FFmpeg multi-output command",
-		logger.Int("num_args", len(args)),
+		logger.String("command", cmdStr),
 	)
 
 	// 执行命令
@@ -302,11 +304,30 @@ func (t *FFmpegTranscoder) transcodeAllVariants(
 			err = fmt.Errorf("transcoding timed out after %v", timeout)
 		}
 		telemetry.RecordError(ctx, err)
-		return fmt.Errorf("ffmpeg failed: %w", err)
+		return fmt.Errorf("ffmpeg failed with command [%s]: %w", cmdStr, err)
 	}
 
 	log.InfoContext(ctx, "All variants transcoded successfully")
 	return nil
+}
+
+// formatFFmpegCommand 格式化 FFmpeg 命令用于日志输出
+func formatFFmpegCommand(args []string) string {
+	var sb strings.Builder
+	for i, arg := range args {
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		// 包含空格的参数需要引号
+		if strings.ContainsAny(arg, " \\\"'") {
+			sb.WriteString("'")
+			sb.WriteString(strings.ReplaceAll(arg, "'", "\\'"))
+			sb.WriteString("'")
+		} else {
+			sb.WriteString(arg)
+		}
+	}
+	return sb.String()
 }
 
 // buildFiltergraph 构建复杂滤镜图
@@ -322,21 +343,24 @@ func (t *FFmpegTranscoder) buildFiltergraph(
 
 	var parts []string
 
-	// 第一步：构建输入处理链（旋转 + split）
-	var inputFilters []string
+	// 第一步：构建输入处理链
+	var currentInputLabel = "0:v"
 
 	// 添加旋转滤镜（如需要）
 	// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
 	switch videoInfo.Rotation {
 	case 90, -270:
 		// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
-		inputFilters = append(inputFilters, "transpose=2")
+		parts = append(parts, fmt.Sprintf("[%s]transpose=2[rotated]", currentInputLabel))
+		currentInputLabel = "rotated"
 	case 180, -180:
 		// 旋转180度
-		inputFilters = append(inputFilters, "transpose=1,transpose=1")
+		parts = append(parts, fmt.Sprintf("[%s]transpose=1,transpose=1[rotated]", currentInputLabel))
+		currentInputLabel = "rotated"
 	case 270, -90:
 		// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
-		inputFilters = append(inputFilters, "transpose=1")
+		parts = append(parts, fmt.Sprintf("[%s]transpose=1[rotated]", currentInputLabel))
+		currentInputLabel = "rotated"
 	}
 
 	// 添加 split 滤镜
@@ -344,9 +368,7 @@ func (t *FFmpegTranscoder) buildFiltergraph(
 	for i := 0; i < numVariants; i++ {
 		splitLabels[i] = fmt.Sprintf("v%d", i+1)
 	}
-	inputFilters = append(inputFilters, fmt.Sprintf("split=%d%s", numVariants, strings.Join(splitLabels, "")))
-
-	parts = append(parts, fmt.Sprintf("[0:v]%s", strings.Join(inputFilters, ",")))
+	parts = append(parts, fmt.Sprintf("[%s]split=%d%s", currentInputLabel, numVariants, strings.Join(splitLabels, "")))
 
 	// 第二步：为每个变体添加缩放链
 	outputLabels := make([]string, numVariants)
