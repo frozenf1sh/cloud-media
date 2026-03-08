@@ -206,6 +206,30 @@ go run ./test/e2e -video ./test/assets/sample.mp4
 open test_result.html
 ```
 
+### Kubernetes (k3s) 部署
+
+项目提供完整的 k3s 部署配置，支持 Kustomize 分层部署：
+
+```bash
+# 前置要求
+# - Kubernetes 集群（k3s 或其他）
+# - kubectl 已配置并能连接集群
+# - kubeseal 已安装（用于 Sealed Secrets）
+
+# 1. 生成 Sealed Secrets（首次部署）
+./scripts/seal-secrets.sh
+
+# 2. 完全重新部署
+kubectl apply -k k8s/
+
+# 3. 观察部署进度
+kubectl get pods -n cloud-media -w
+```
+
+**详细文档**:
+- `k8s/DEPLOYMENT_GUIDE.md` - 完全重新部署指南
+- `k8s/SECRETS_REQUIREMENTS.md` - 各服务密钥需求清单
+
 ---
 
 ## 🔌 API 接口
@@ -281,14 +305,70 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 *   [x] **preStop 智能等待**: /status 端点 + 脚本等待活动任务完成
 *   [x] **可观测性优雅降级**: traces/metrics 初始化失败时降级为 noop
 *   [x] **自动创建 Bucket**: API Server 和 Worker 启动时自动创建 media-input/media-output
+*   [x] **Sealed Secrets 密钥管理**: 使用 Bitnami Sealed Secrets 安全管理所有 Kubernetes Secret，支持安全提交到 Git
+*   [x] **部署指南**: 完整的 k8s 重新部署指南和密钥需求清单
+*   [x] **压力测试与调优**: 8核 AMD R9 7940H 上的性能测试，发现 Pod 数量与单任务性能的最佳平衡点
 
 ### 进行中
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
 *   [ ] **WebHook**: 任务完成回调通知
+*   [ ] **性能调优**: 基于压力测试结果的进一步优化
 
 ### 未来规划
 *   [ ] **大视频分片上传**: S3 Multipart Upload 支持，断点续传
 *   [ ] **管道流处理**: 使用 io.Pipe 边下边转码，减少磁盘 I/O
+
+---
+
+## 📊 性能测试与调优
+
+### 压力测试结果 (AMD R9 7940H, 8核)
+
+测试环境:
+- **CPU**: AMD Ryzen 9 7940H (8核16线程)
+- **测试负载**: 200个视频转码任务
+- **测试视频**: 约10秒短视频
+
+| 配置 | Max Pods=10 | Max Pods=6 |
+| :--- | :--- | :--- |
+| **吞吐量 (Throughput)** | 2.17 tasks/sec | **1.81 tasks/sec** ⬇️ |
+| **平均处理时间** | 3.96s | **2.84s** ⬇️ **(快 28%)** |
+| **P50 处理时间** | - | 2.06s |
+| **P95 处理时间** | - | 4.09s |
+| **P99 处理时间** | - | 4.21s |
+| **总耗时** | - | 1m50s |
+| **成功率** | 100% | 100% |
+
+### 关键发现
+
+1. **资源争用现象**:
+   - 当 Pod 数从 10 降到 6，虽然总吞吐量略降，但单任务处理速度显著提升 28%
+   - 原因：过多 Pod 同时运行 FFmpeg 导致 CPU 缓存失效、上下文切换开销增大
+
+2. **最佳平衡点**:
+   - 对于 8 核 CPU，Max Pods=6 似乎是更好的选择
+   - 每个任务获得更多专用 CPU 时间，用户体验更好（更快完成单个任务）
+
+3. **队列等待时间**:
+   - P95 队列等待时间: 1m42s
+   - 系统需要在"快的单个任务"和"少的队列等待"之间权衡
+
+### 调优建议
+
+**KEDA ScaledObject 配置**:
+```yaml
+maxReplicaCount: 6  # 根据 CPU 核心数调整 (核数 × 0.75)
+advanced:
+  horizontalPodAutoscalerConfig:
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 1800  # 30分钟稳定窗口
+```
+
+**后续优化方向**:
+- [ ] 考虑 Pod CPU 资源限制 (requests/limits)
+- [ ] 测试不同 FFmpeg preset 对性能的影响
+- [ ] 添加基于队列等待时间的自动调优
 
 ---
 
