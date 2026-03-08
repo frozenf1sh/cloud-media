@@ -162,6 +162,9 @@ func Load(filePath string) (*Config, error) {
 	// 设置默认值
 	setDefaults(v)
 
+	// 显式绑定所有环境变量（确保环境变量能正确映射）
+	bindEnvVars(v)
+
 	// 配置文件设置
 	if filePath != "" {
 		slog.Info("Loading config from specified path", "path", filePath)
@@ -270,9 +273,46 @@ func overrideFromEnv(cfg *Config) {
 		cfg.ObjectStorage.CDN.BaseURL = val
 	}
 
-	// Observability Service Name
+	// Observability
 	if val := getEnv("OBSERVABILITY_SERVICE_NAME"); val != "" {
 		cfg.Observability.ServiceName = val
+	}
+	if val := getEnv("OBSERVABILITY_SERVICE_VERSION"); val != "" {
+		cfg.Observability.ServiceVersion = val
+	}
+
+	// Observability - Metrics
+	if val := getEnv("OBSERVABILITY_METRICS_ENABLED"); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			cfg.Observability.Metrics.Enabled = b
+		}
+	}
+	if val := getEnv("OBSERVABILITY_METRICS_EXPORTER"); val != "" {
+		cfg.Observability.Metrics.Exporter = val
+	}
+	if val := getEnv("OBSERVABILITY_METRICS_OTLP_ENDPOINT"); val != "" {
+		cfg.Observability.Metrics.OTLPEndpoint = val
+	}
+
+	// Observability - Tracing
+	if val := getEnv("OBSERVABILITY_TRACING_ENABLED"); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			cfg.Observability.Tracing.Enabled = b
+		}
+	}
+	if val := getEnv("OBSERVABILITY_TRACING_EXPORTER"); val != "" {
+		cfg.Observability.Tracing.Exporter = val
+	}
+	if val := getEnv("OBSERVABILITY_TRACING_OTLP_ENDPOINT"); val != "" {
+		cfg.Observability.Tracing.OTLPEndpoint = val
+	}
+	if val := getEnv("OBSERVABILITY_TRACING_SAMPLER"); val != "" {
+		cfg.Observability.Tracing.Sampler = val
+	}
+	if val := getEnv("OBSERVABILITY_TRACING_SAMPLER_RATIO"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			cfg.Observability.Tracing.SamplerRatio = f
+		}
 	}
 }
 
