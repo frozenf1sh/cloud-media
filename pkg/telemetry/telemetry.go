@@ -20,6 +20,43 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// 自定义属性键，用于标记健康检查请求
+const attrKeyHealthCheck = "health_check"
+
+// AttrHealthCheck 用于标记健康检查请求的属性
+var AttrHealthCheck = attribute.Bool(attrKeyHealthCheck, true)
+
+// healthCheckSampler 自定义采样器，用于过滤健康检查请求
+type healthCheckSampler struct {
+	base sdktrace.Sampler
+}
+
+// NewHealthCheckSampler 创建一个新的健康检查过滤采样器
+func NewHealthCheckSampler(base sdktrace.Sampler) sdktrace.Sampler {
+	return &healthCheckSampler{base: base}
+}
+
+// ShouldSample 实现 sdktrace.Sampler 接口
+func (s *healthCheckSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	// 检查是否有健康检查属性
+	for _, attr := range params.Attributes {
+		if attr.Key == attrKeyHealthCheck && attr.Value.AsBool() {
+			// 健康检查请求，直接 Drop
+			return sdktrace.SamplingResult{
+				Decision:   sdktrace.Drop,
+				Attributes: params.Attributes,
+			}
+		}
+	}
+	// 非健康检查请求，委托给基础采样器
+	return s.base.ShouldSample(params)
+}
+
+// Description 实现 sdktrace.Sampler 接口
+func (s *healthCheckSampler) Description() string {
+	return fmt.Sprintf("HealthCheckSampler{base=%s}", s.base.Description())
+}
+
 // Config 追踪配置
 type Config struct {
 	ServiceName    string
@@ -240,17 +277,20 @@ func Int64(key string, value int64) attribute.KeyValue {
 
 // createSampler 创建采样器
 func createSampler(cfg Config) (sdktrace.Sampler, error) {
+	var baseSampler sdktrace.Sampler
 	switch cfg.Sampler {
 	case "always_on":
 		// 使用 ParentBased 包装，确保即使有父 span 也总是采样
-		return sdktrace.ParentBased(sdktrace.AlwaysSample()), nil
+		baseSampler = sdktrace.ParentBased(sdktrace.AlwaysSample())
 	case "always_off":
-		return sdktrace.ParentBased(sdktrace.NeverSample()), nil
+		baseSampler = sdktrace.ParentBased(sdktrace.NeverSample())
 	case "traceidratio":
-		return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SamplerRatio)), nil
+		baseSampler = sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SamplerRatio))
 	default:
 		return nil, fmt.Errorf("unknown sampler: %s", cfg.Sampler)
 	}
+	// 使用健康检查过滤采样器包装基础采样器
+	return NewHealthCheckSampler(baseSampler), nil
 }
 
 // createExporter 创建导出器
