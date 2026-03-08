@@ -4,6 +4,7 @@ kind: Kustomization
 namespace: cloud-media
 resources:
   - common-configmap.yaml
+  - secrets.yaml
   - worker-prestop-script.yaml
   - api-server/service.yaml
   - api-server/deployment.yaml

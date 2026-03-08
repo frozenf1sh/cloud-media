@@ -1,4 +1,3 @@
-
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -7,35 +6,34 @@ metadata:
 spec:
   scaleTargetRef:
     name: worker
-  pollingInterval: 10
-  cooldownPeriod: 300
-  minReplicaCount: 0            # 允许缩容到 0（空闲时节省资源）
-  maxReplicaCount: 10
+  pollingInterval: 5            # 优化：缩短轮询间隔，让扩容反应更快（默认30s，视频处理建议更敏捷）
+  cooldownPeriod: 60            # 优化：缩短 KEDA 自身的冷却时间，依赖 HPA 的稳定窗口控制
+  minReplicaCount: 0            # 允许缩容到 0
+  maxReplicaCount: 10           # 根据你的资源配额设定
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
         scaleUp:
-          stabilizationWindowSeconds: 0 # 扩容要快
+          stabilizationWindowSeconds: 0 # 激进扩容：有任务立刻起 Pod
           policies:
           - type: Pods
-            value: 5
-            periodSeconds: 30
+            value: 10                   # 允许一次性扩容较多 Pod，避免积压
+            periodSeconds: 15
         scaleDown:
-          stabilizationWindowSeconds: 300 # 稳定缩容
-          selectPolicy: Min
+          stabilizationWindowSeconds: 300 # 缩容稳定窗口：空闲 5 分钟后再开始缩容（防止网络波动导致反复重启）
+          selectPolicy: Max               # 选择最快的缩容策略
           policies:
-          - type: Pods
-            value: 1
-            periodSeconds: 60
+          - type: Percent
+            value: 100                    # 优化：一旦过了稳定窗口，允许快速缩容以节省成本（原配置一次只缩1个太慢）
+            periodSeconds: 15
   triggers:
-    # RabbitMQ 队列长度触发器
     - type: rabbitmq
       metadata:
-        mode: QueueLength               # 明确使用长度模式
+        mode: QueueLength         # 模式：基于队列长度
+        value: "1"                # 【核心修复】：目标是每个 Pod 处理 1 个消息 (Total / Target = Replicas)
+        activationQueueLength: "1" # 当队列有1个积压时，从0扩容到1
         queueName: video_transcode_tasks
-        queueLength: "1"
-        activationQueueLength: "1"
         vhostName: "/"
-        includeUnacked: "true"  # 同时考虑 unacked 消息（KEDA 2.10+）
+        includeUnacked: "true"    # 关键：切片处理时消息处于 Unacked 状态，必须统计，否则处理中会误判缩容
       authenticationRef:
         name: rabbitmq-trigger-auth

@@ -3,15 +3,19 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: cloud-media
 resources:
-  - postgres/secret.yaml
+  # Postgres
+  - postgres/secrets.yaml
   - postgres/pvc.yaml
   - postgres/service.yaml
   - postgres/statefulset.yaml
-  - rabbitmq/secret.yaml
+  # RabbitMQ
+  - rabbitmq/secrets.yaml
   - rabbitmq/pvc.yaml
   - rabbitmq/service.yaml
   - rabbitmq/statefulset.yaml
-  - minio/secret.yaml
+  # MinIO
+  - minio/secrets.yaml
   - minio/pvc.yaml
   - minio/service.yaml
   - minio/statefulset.yaml
+
