@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +25,44 @@ import (
 
 const (
 	defaultApiServerAddr = "http://media-api.frozenf1sh.loc/"
+	pollInterval         = 2 * time.Second
 )
+
+// Task status constants
+const (
+	TaskStatusPending    = "pending"
+	TaskStatusQueued     = "queued"
+	TaskStatusProcessing = "processing"
+	TaskStatusSuccess    = "success"
+	TaskStatusFailed     = "failed"
+	TaskStatusCancelled  = "cancelled"
+)
+
+// TaskResult holds the result of a single task
+type TaskResult struct {
+	TaskID          string
+	SubmitTime      time.Time
+	StartTime       time.Time
+	EndTime         time.Time
+	Status          string
+	Error           string
+	QueuedDuration  time.Duration
+	ProcessDuration time.Duration
+	TotalDuration   time.Duration
+}
+
+// Stats holds aggregate statistics
+type Stats struct {
+	TotalTasks       int
+	Successful       int
+	Failed           int
+	TotalDuration    time.Duration
+	SubmitDuration   time.Duration
+	QueuedDurations  []time.Duration
+	ProcessDurations []time.Duration
+	TotalDurations   []time.Duration
+	Throughput       float64 // tasks per second
+}
 
 func main() {
 	videoPath := flag.String("video", "", "Path to video file (required)")
@@ -67,9 +106,9 @@ func main() {
 	videoClient := pbconnect.NewVideoServiceClient(http.DefaultClient, *apiAddr)
 	log.Info("API client initialized")
 
-	startTime := time.Now()
-	var successCount, failCount int32
-	var wg sync.WaitGroup
+	// Phase 1: Submit all tasks
+	log.Info("Phase 1: Submitting tasks")
+	submitStart := time.Now()
 
 	var sourceBucket, sourceKey string
 	if *reuseUpload {
@@ -96,6 +135,10 @@ func main() {
 	}
 	close(taskChan)
 
+	var taskResults sync.Map // map[string]*TaskResult
+	var submitSuccessCount, submitFailCount int32
+	var wg sync.WaitGroup
+
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
 		go func(workerID int) {
@@ -103,7 +146,7 @@ func main() {
 			workerLog := log.With("worker_id", workerID)
 
 			for range taskChan {
-				taskStartTime := time.Now()
+				taskSubmitTime := time.Now()
 				taskID := uuid.New().String()
 				taskLog := workerLog.With("task_id", taskID)
 
@@ -114,13 +157,23 @@ func main() {
 					err = uploadAndSubmitTask(ctx, taskLog, videoClient, taskID, *videoPath)
 				}
 
-				if err != nil {
-					atomic.AddInt32(&failCount, 1)
-					taskLog.Warn("Task failed", "error", err, "duration", time.Since(taskStartTime))
-				} else {
-					atomic.AddInt32(&successCount, 1)
-					taskLog.Info("Task submitted successfully", "duration", time.Since(taskStartTime))
+				result := &TaskResult{
+					TaskID:     taskID,
+					SubmitTime: taskSubmitTime,
 				}
+
+				if err != nil {
+					atomic.AddInt32(&submitFailCount, 1)
+					result.Status = TaskStatusFailed
+					result.Error = err.Error()
+					taskLog.Warn("Task submission failed", "error", err)
+				} else {
+					atomic.AddInt32(&submitSuccessCount, 1)
+					result.Status = TaskStatusQueued
+					taskLog.Debug("Task submitted successfully")
+				}
+
+				taskResults.Store(taskID, result)
 
 				if *interval > 0 {
 					time.Sleep(*interval)
@@ -130,23 +183,290 @@ func main() {
 	}
 
 	wg.Wait()
-	totalDuration := time.Since(startTime)
+	submitDuration := time.Since(submitStart)
+
+	log.Info("Phase 1 complete: All tasks submitted",
+		"submitted", submitSuccessCount,
+		"failed_submit", submitFailCount,
+		"duration", submitDuration)
+
+	if submitSuccessCount == 0 {
+		log.Error("No tasks were successfully submitted")
+		os.Exit(1)
+	}
+
+	// Phase 2: Poll for task completion
+	log.Info("Phase 2: Waiting for tasks to complete")
+	pollStart := time.Now()
+
+	pollTasks(ctx, log, videoClient, &taskResults, int(submitSuccessCount))
+	totalDuration := time.Since(submitStart)
+	pollDuration := time.Since(pollStart)
+
+	log.Info("Phase 2 complete: All tasks finished", "duration", pollDuration)
+
+	// Generate statistics
+	stats := calculateStats(&taskResults, submitDuration, *count)
+
+	// Print summary
+	printSummary(log, stats, &taskResults, submitDuration, pollDuration, totalDuration)
+}
+
+// pollTasks polls all tasks until they reach a terminal state
+func pollTasks(ctx context.Context, log *slog.Logger, client pbconnect.VideoServiceClient, taskResults *sync.Map, expectedCount int) {
+	completedCount := 0
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for completedCount < expectedCount {
+		<-ticker.C
+
+		currentCompleted := 0
+		inProgress := 0
+		queued := 0
+
+		taskResults.Range(func(key, value interface{}) bool {
+			taskID := key.(string)
+			result := value.(*TaskResult)
+
+			// Skip if already in terminal state
+			if isTerminalState(result.Status) {
+				currentCompleted++
+				return true
+			}
+
+			// Poll current status
+			statusResp, err := getTaskStatus(ctx, client, taskID)
+			if err != nil {
+				log.Debug("Failed to get task status", "task_id", taskID, "error", err)
+				return true
+			}
+
+			oldStatus := result.Status
+			result.Status = statusResp.Status
+
+			// Record start time when moving to processing
+			if oldStatus != TaskStatusProcessing &&
+				result.Status == TaskStatusProcessing {
+				result.StartTime = time.Now()
+				log.Debug("Task started processing", "task_id", taskID)
+			}
+
+			// Record end time when reaching terminal state
+			if isTerminalState(result.Status) {
+				result.EndTime = time.Now()
+				if !result.StartTime.IsZero() {
+					result.ProcessDuration = result.EndTime.Sub(result.StartTime)
+				}
+				if !result.StartTime.IsZero() {
+					result.QueuedDuration = result.StartTime.Sub(result.SubmitTime)
+				}
+				result.TotalDuration = result.EndTime.Sub(result.SubmitTime)
+
+				if result.Status == TaskStatusFailed && statusResp.ErrorMessage != "" {
+					result.Error = statusResp.ErrorMessage
+				}
+
+				currentCompleted++
+				log.Info("Task completed",
+					"task_id", taskID,
+					"status", result.Status,
+					"total_duration", result.TotalDuration)
+			} else if result.Status == TaskStatusProcessing {
+				inProgress++
+			} else {
+				queued++
+			}
+
+			return true
+		})
+
+		completedCount = currentCompleted
+
+		if completedCount < expectedCount {
+			log.Info("Progress update",
+				"completed", completedCount,
+				"in_progress", inProgress,
+				"queued", queued,
+				"remaining", expectedCount-completedCount)
+		}
+	}
+}
+
+func isTerminalState(status string) bool {
+	return status == TaskStatusSuccess ||
+		status == TaskStatusFailed ||
+		status == TaskStatusCancelled
+}
+
+func getTaskStatus(ctx context.Context, client pbconnect.VideoServiceClient, taskID string) (*pb.GetTaskStatusResponse, error) {
+	req := connect.NewRequest(&pb.GetTaskStatusRequest{
+		TaskId: taskID,
+	})
+
+	resp, err := client.GetTaskStatus(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Msg, nil
+}
+
+func calculateStats(taskResults *sync.Map, submitDuration time.Duration, totalCount int) *Stats {
+	stats := &Stats{
+		TotalTasks: totalCount,
+	}
+
+	var minSubmitTime time.Time
+	var maxEndTime time.Time
+
+	taskResults.Range(func(key, value interface{}) bool {
+		result := value.(*TaskResult)
+
+		if result.Status == TaskStatusSuccess {
+			stats.Successful++
+		} else if result.Status == TaskStatusFailed || result.Status == TaskStatusCancelled {
+			stats.Failed++
+		}
+
+		if result.QueuedDuration > 0 {
+			stats.QueuedDurations = append(stats.QueuedDurations, result.QueuedDuration)
+		}
+		if result.ProcessDuration > 0 {
+			stats.ProcessDurations = append(stats.ProcessDurations, result.ProcessDuration)
+		}
+		if result.TotalDuration > 0 {
+			stats.TotalDurations = append(stats.TotalDurations, result.TotalDuration)
+		}
+
+		// Track min submit time and max end time for throughput calculation
+		if result.Status == TaskStatusSuccess {
+			if minSubmitTime.IsZero() || result.SubmitTime.Before(minSubmitTime) {
+				minSubmitTime = result.SubmitTime
+			}
+			if !result.EndTime.IsZero() && (maxEndTime.IsZero() || result.EndTime.After(maxEndTime)) {
+				maxEndTime = result.EndTime
+			}
+		}
+
+		return true
+	})
+
+	if stats.Successful > 0 && !maxEndTime.IsZero() && !minSubmitTime.IsZero() {
+		stats.TotalDuration = maxEndTime.Sub(minSubmitTime)
+		if stats.TotalDuration.Seconds() > 0 {
+			stats.Throughput = float64(stats.Successful) / stats.TotalDuration.Seconds()
+		}
+	}
+
+	return stats
+}
+
+func printSummary(log *slog.Logger, stats *Stats, taskResults *sync.Map, submitDuration, pollDuration, totalDuration time.Duration) {
+	fmt.Printf("\n")
+	fmt.Printf("==============================================\n")
+	fmt.Printf("          LOAD TEST SUMMARY\n")
+	fmt.Printf("==============================================\n\n")
+
+	fmt.Printf("--- Submission Phase ---\n")
+	fmt.Printf("Submit Duration:    %v\n", submitDuration)
+	fmt.Printf("\n")
+
+	fmt.Printf("--- Processing Phase ---\n")
+	fmt.Printf("Poll Duration:      %v\n", pollDuration)
+	fmt.Printf("\n")
+
+	fmt.Printf("--- Overall Results ---\n")
+	fmt.Printf("Total Tasks:        %d\n", stats.TotalTasks)
+	fmt.Printf("Successful:         %d\n", stats.Successful)
+	fmt.Printf("Failed:             %d\n", stats.Failed)
+	if stats.TotalTasks > 0 {
+		fmt.Printf("Success Rate:       %.2f%%\n", float64(stats.Successful)/float64(stats.TotalTasks)*100)
+	}
+	fmt.Printf("Total Wall Time:    %v\n", totalDuration)
+	if stats.Throughput > 0 {
+		fmt.Printf("Throughput:         %.2f tasks/sec\n", stats.Throughput)
+	}
+	fmt.Printf("\n")
+
+	if len(stats.QueuedDurations) > 0 {
+		fmt.Printf("--- Queue Time Statistics ---\n")
+		printDurationStats(stats.QueuedDurations)
+		fmt.Printf("\n")
+	}
+
+	if len(stats.ProcessDurations) > 0 {
+		fmt.Printf("--- Processing Time Statistics ---\n")
+		printDurationStats(stats.ProcessDurations)
+		fmt.Printf("\n")
+	}
+
+	if len(stats.TotalDurations) > 0 {
+		fmt.Printf("--- Total Time Statistics ---\n")
+		printDurationStats(stats.TotalDurations)
+		fmt.Printf("\n")
+	}
+
+	// Show failed tasks if any
+	if stats.Failed > 0 {
+		fmt.Printf("--- Failed Tasks ---\n")
+		taskResults.Range(func(key, value interface{}) bool {
+			result := value.(*TaskResult)
+			if result.Status == TaskStatusFailed || result.Status == TaskStatusCancelled {
+				fmt.Printf("  Task %s: %s\n", result.TaskID, result.Error)
+			}
+			return true
+		})
+		fmt.Printf("\n")
+	}
+
+	fmt.Printf("==============================================\n\n")
 
 	log.Info("Load test completed",
-		"total_tasks", *count,
-		"successful_tasks", successCount,
-		"failed_tasks", failCount,
+		"total_tasks", stats.TotalTasks,
+		"successful", stats.Successful,
+		"failed", stats.Failed,
 		"total_duration", totalDuration)
+}
 
-	fmt.Printf("\n=== Load Test Summary ===\n")
-	fmt.Printf("Total Tasks:     %d\n", *count)
-	fmt.Printf("Successful:      %d\n", successCount)
-	fmt.Printf("Failed:          %d\n", failCount)
-	fmt.Printf("Total Duration:  %v\n", totalDuration)
-	if *count > 0 {
-		fmt.Printf("Avg Task Time:   %v\n", totalDuration/time.Duration(*count))
+func printDurationStats(durations []time.Duration) {
+	if len(durations) == 0 {
+		return
 	}
-	fmt.Printf("========================\n\n")
+
+	sort.Slice(durations, func(i, j int) bool {
+		return durations[i] < durations[j]
+	})
+
+	sum := time.Duration(0)
+	for _, d := range durations {
+		sum += d
+	}
+
+	mean := sum / time.Duration(len(durations))
+	p50 := durations[len(durations)*50/100]
+	p95 := durations[len(durations)*95/100]
+	p99 := durations[len(durations)*99/100]
+	min := durations[0]
+	max := durations[len(durations)-1]
+
+	// Calculate standard deviation
+	var varianceSum float64
+	meanSec := mean.Seconds()
+	for _, d := range durations {
+		diff := d.Seconds() - meanSec
+		varianceSum += diff * diff
+	}
+	stdDev := time.Duration(math.Sqrt(varianceSum/float64(len(durations))) * float64(time.Second))
+
+	fmt.Printf("  Count:    %d\n", len(durations))
+	fmt.Printf("  Min:      %v\n", min)
+	fmt.Printf("  Max:      %v\n", max)
+	fmt.Printf("  Mean:     %v\n", mean)
+	fmt.Printf("  StdDev:   %v\n", stdDev)
+	fmt.Printf("  P50:      %v\n", p50)
+	fmt.Printf("  P95:      %v\n", p95)
+	fmt.Printf("  P99:      %v\n", p99)
 }
 
 func uploadAndSubmitTask(ctx context.Context, log *slog.Logger, client pbconnect.VideoServiceClient, taskID, videoPath string) error {
@@ -247,4 +567,3 @@ func uploadViaPresignedURL(ctx context.Context, log *slog.Logger, filePath, uplo
 
 	return nil
 }
-
