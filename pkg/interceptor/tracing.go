@@ -7,6 +7,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/metrics"
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
@@ -18,15 +19,23 @@ func TracingInterceptor(next http.Handler) http.Handler {
 		// 从请求头中提取 trace 上下文
 		ctx := telemetry.ExtractFromCarrier(r.Context(), headersToCarrier(r.Header))
 
-		// 开始一个新的 span
-		spanName := r.Method + " " + r.URL.Path
-		ctx, span := telemetry.StartSpan(ctx, spanName,
+		// 准备 span 属性
+		attrs := []attribute.KeyValue{
 			semconv.HTTPRequestMethodKey.String(r.Method),
 			semconv.URLPath(r.URL.Path),
 			semconv.HTTPRoute(r.URL.Path),
 			semconv.NetworkProtocolVersion(r.Proto),
 			semconv.ClientAddress(r.RemoteAddr),
-		)
+		}
+
+		// 如果是健康检查，添加标记属性
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+			attrs = append(attrs, telemetry.AttrHealthCheck)
+		}
+
+		// 开始一个新的 span
+		spanName := r.Method + " " + r.URL.Path
+		ctx, span := telemetry.StartSpan(ctx, spanName, attrs...)
 		defer span.End()
 
 		// 使用支持更多接口的包装器
@@ -39,6 +48,11 @@ func TracingInterceptor(next http.Handler) http.Handler {
 		next.ServeHTTP(lrw, r.WithContext(ctx))
 
 		duration := time.Since(start)
+
+		// 健康检查请求不记录指标和日志
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+			return
+		}
 
 		// 记录指标
 		metrics.RecordAPIRequest(r.Method, r.URL.Path, lrw.statusCode, duration)
