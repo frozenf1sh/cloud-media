@@ -1,0 +1,43 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: cloud-media
+data:
+  loki.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: Loki
+      type: loki
+      access: proxy
+      orgId: 1
+      url: http://loki-service:3100
+      basicAuth: false
+      isDefault: false
+      version: 1
+      editable: false
+  tempo.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: Tempo
+      type: tempo
+      access: proxy
+      orgId: 1
+      url: http://tempo-service:3200
+      basicAuth: false
+      isDefault: false
+      version: 1
+      editable: false
+  mimir.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: Mimir
+      type: prometheus
+      access: proxy
+      orgId: 1
+      url: http://mimir-service:8080/prometheus
+      basicAuth: false
+      isDefault: true
+      version: 1
+      editable: false

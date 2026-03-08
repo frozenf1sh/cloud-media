@@ -1,0 +1,68 @@
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-agent-config
+  namespace: cloud-media
+data:
+  config.yaml: |
+    receivers:
+      filelog:
+        include:
+          - /var/log/pods/*/*/*.log
+        include_file_path: true
+        start_at: beginning
+        operators:
+          - type: container
+          - type: remove
+            field: attributes.log_file_path
+
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+      batch:
+        send_batch_size: 8192
+        timeout: 200ms
+      resource:
+        attributes:
+          - action: insert
+            key: k8s.cluster.name
+            value: cloud-media-cluster
+
+    exporters:
+      otlp:
+        endpoint: otelcol-gateway-service:4317
+        tls:
+          insecure: true
+
+      otlphttp:
+        endpoint: http://otelcol-gateway-service:4318
+        tls:
+          insecure: true
+
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        logs:
+          receivers: [filelog]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlphttp]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp]
