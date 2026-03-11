@@ -7,7 +7,7 @@ metadata:
   labels:
     app: api-server
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: api-server
@@ -16,6 +16,19 @@ spec:
       labels:
         app: api-server
     spec:
+      # Pod 反亲和性：确保 api-server Pod 分散在不同节点
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - api-server
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: api-server
           image: ghcr.io/frozenf1sh/cloud-media-api-server:latest
