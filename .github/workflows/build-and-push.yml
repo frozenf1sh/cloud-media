@@ -6,11 +6,12 @@ on:
       - main
     tags:
       - 'v*'
-    # 路径过滤：如果只修改了文档，不触发构建
+    # 路径过滤：如果只修改了文档或 k8s 配置，不触发构建
     paths-ignore:
       - '**.md'
       - '.gitignore'
       - 'docs/**'
+      - 'k8s/**'
   pull_request:
     branches:
       - main
@@ -19,6 +20,7 @@ on:
       - '**.md'
       - '.gitignore'
       - 'docs/**'
+      - 'k8s/**'
 
 env:
   REGISTRY: ghcr.io
