@@ -32,7 +32,8 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	outboxService := usecase.NewOutboxService(outboxRepository, videoTaskRepository, processedMessageRepository, rabbitMQBroker)
+	database := persistence.NewDatabase(db)
+	outboxService := usecase.NewOutboxService(outboxRepository, videoTaskRepository, processedMessageRepository, rabbitMQBroker, database)
 	objectStorageConfig := provideObjectStorageConfig(cfg)
 	s3CompatStorage, err := storage.NewS3CompatStorage(objectStorageConfig)
 	if err != nil {
@@ -40,7 +41,6 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 	}
 	videoUseCase := usecase.NewVideoUseCase(outboxService, videoTaskRepository, s3CompatStorage)
 	videoServer := rpc.NewVideoServer(videoUseCase)
-	database := persistence.NewDatabase(db)
 	server := NewServer(videoServer, database, s3CompatStorage, outboxService)
 	return server, nil
 }
