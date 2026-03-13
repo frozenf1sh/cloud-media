@@ -27,6 +27,10 @@ func NewProgressParser() *ProgressParser {
 func (p *ProgressParser) Parse(stderr io.ReadCloser, duration float64, callback ProgressCallback) {
 	scanner := bufio.NewScanner(stderr)
 
+	// 跟踪最大进度，防止在多路输出时进度回退
+	maxProgress := 0
+	lastReportedProgress := -1
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -43,8 +47,16 @@ func (p *ProgressParser) Parse(stderr io.ReadCloser, duration float64, callback 
 				if progress > 100 {
 					progress = 100
 				}
-				if callback != nil {
-					callback(progress, fmt.Sprintf("Processing: %.1f/%.1fs", currentTime, duration))
+
+				// 只记录最大进度，防止多路输出时进度回退
+				if progress > maxProgress {
+					maxProgress = progress
+				}
+
+				// 只在进度变化至少 1% 时才回调，避免过于频繁
+				if callback != nil && maxProgress != lastReportedProgress {
+					lastReportedProgress = maxProgress
+					callback(maxProgress, fmt.Sprintf("Processing: %.1f/%.1fs", currentTime, duration))
 				}
 			}
 		}
