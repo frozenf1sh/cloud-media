@@ -178,6 +178,14 @@ func (s *OutboxService) PublishVideoTaskTransactional(
 		logger.String("task_id", task.TaskID),
 		logger.String("event_id", event.EventID))
 
+	// 立即尝试发布，保持链路连续
+	if err := s.publishSingleEvent(ctx, event); err != nil {
+		// 发布失败只记录日志，不返回错误（后台会重试）
+		logger.WarnContext(ctx, "Failed to publish immediately, will retry later",
+			logger.String("event_id", event.EventID),
+			logger.Err(err))
+	}
+
 	return nil
 }
 

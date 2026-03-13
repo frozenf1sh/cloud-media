@@ -228,11 +228,6 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 
 // WithTraceSpanContext 向上下文中添加 trace 和 span
 func WithTraceSpanContext(ctx context.Context, traceID, spanID string) context.Context {
-	// 如果已经有 trace，直接返回
-	if trace.SpanFromContext(ctx).SpanContext().HasTraceID() {
-		return ctx
-	}
-
 	var tid trace.TraceID
 	var sid trace.SpanID
 	var err error
