@@ -38,7 +38,7 @@ RUN apk add --no-cache ffmpeg
 # =============================================
 # API Server 镜像
 # =============================================
-FROM ffmpeg-base AS api-server
+FROM alpine:3.21 AS api-server
 
 # 设置工作目录
 WORKDIR /app
