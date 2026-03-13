@@ -196,6 +196,15 @@ func TraceIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// SpanIDFromContext 从上下文获取 span ID
+func SpanIDFromContext(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if span.SpanContext().HasSpanID() {
+		return span.SpanContext().SpanID().String()
+	}
+	return ""
+}
+
 // WithTraceID 向上下文中添加 trace（通过创建一个新的 span）
 func WithTraceID(ctx context.Context, traceID string) context.Context {
 	// 如果已经有 trace，直接返回
@@ -215,6 +224,47 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 	}
 
 	return ctx
+}
+
+// WithTraceSpanContext 向上下文中添加 trace 和 span
+func WithTraceSpanContext(ctx context.Context, traceID, spanID string) context.Context {
+	// 如果已经有 trace，直接返回
+	if trace.SpanFromContext(ctx).SpanContext().HasTraceID() {
+		return ctx
+	}
+
+	var tid trace.TraceID
+	var sid trace.SpanID
+	var err error
+
+	// 解析 trace ID
+	if traceID != "" {
+		tid, err = trace.TraceIDFromHex(traceID)
+		if err != nil {
+			return ctx
+		}
+	} else {
+		return ctx
+	}
+
+	// 解析 span ID
+	if spanID != "" {
+		sid, err = trace.SpanIDFromHex(spanID)
+		if err != nil {
+			// 如果 span ID 解析失败，生成一个随机的
+			sid = [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+		}
+	} else {
+		sid = [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	}
+
+	// 创建 span context
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: tid,
+		SpanID:  sid,
+		Remote:  true,
+	})
+	return trace.ContextWithSpanContext(ctx, sc)
 }
 
 // ExtractFromCarrier 从 carrier 提取 trace 上下文

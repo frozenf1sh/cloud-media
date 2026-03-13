@@ -113,6 +113,8 @@ type OutboxEvent struct {
 	AggregateID   string           // 聚合 ID（如 task_id）
 	AggregateType string           // 聚合类型（如 "video_task"）
 	Payload       []byte           // 事件内容（JSON）
+	TraceID       string           // OpenTelemetry Trace ID
+	SpanID        string           // OpenTelemetry Span ID
 	Status        OutboxEventStatus
 	RetryCount    int              // 重试次数
 	MaxRetries    int              // 最大重试次数

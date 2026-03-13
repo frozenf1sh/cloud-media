@@ -11,6 +11,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
+	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/uuid"
 	"github.com/google/wire"
 	"gorm.io/gorm"
@@ -142,6 +143,8 @@ func (s *OutboxService) PublishVideoTaskTransactional(
 		AggregateID:   task.TaskID,
 		AggregateType: "video_task",
 		Payload:       payload,
+		TraceID:       telemetry.TraceIDFromContext(ctx),
+		SpanID:        telemetry.SpanIDFromContext(ctx),
 		Status:        domain.OutboxStatusPending,
 		RetryCount:    0,
 		MaxRetries:    s.maxRetries,
@@ -206,6 +209,16 @@ func (s *OutboxService) PublishOutboxEvents(ctx context.Context) error {
 
 // publishSingleEvent 发布单个事件
 func (s *OutboxService) publishSingleEvent(ctx context.Context, event *domain.OutboxEvent) error {
+	// 从 OutboxEvent 恢复 trace 上下文
+	if event.TraceID != "" {
+		ctx = telemetry.WithTraceSpanContext(ctx, event.TraceID, event.SpanID)
+		// 启动一个新的 span
+		ctx, _ = telemetry.StartSpan(ctx, "OutboxService.publishSingleEvent",
+			telemetry.String("event_id", event.EventID),
+			telemetry.String("aggregate_id", event.AggregateID),
+		)
+	}
+
 	// 发布到消息队列
 	if err := s.broker.PublishWithConfirm(ctx, event); err != nil {
 		// 发布失败，增加重试计数
