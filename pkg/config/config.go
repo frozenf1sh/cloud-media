@@ -118,6 +118,18 @@ type TranscoderConfig struct {
 	Variants []TranscoderVariantConfig `mapstructure:"variants"`
 }
 
+// OutboxConfig Outbox 服务配置
+type OutboxConfig struct {
+	// RecoveryInterval 恢复扫描间隔（秒）
+	RecoveryInterval int `mapstructure:"recovery_interval"`
+	// PendingTaskMaxAge 待处理任务最大存活时间（分钟）
+	PendingTaskMaxAge int `mapstructure:"pending_task_max_age"`
+	// BatchSize 批量处理大小
+	BatchSize int `mapstructure:"batch_size"`
+	// MaxRetries 最大重试次数
+	MaxRetries int `mapstructure:"max_retries"`
+}
+
 // Config 应用配置
 type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
@@ -126,6 +138,7 @@ type Config struct {
 	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
 	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
 	Transcoder    TranscoderConfig    `mapstructure:"transcoder"`
+	Outbox        OutboxConfig        `mapstructure:"outbox"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
@@ -314,6 +327,28 @@ func overrideFromEnv(cfg *Config) {
 			cfg.Observability.Tracing.SamplerRatio = f
 		}
 	}
+
+	// Outbox
+	if val := getEnv("OUTBOX_RECOVERY_INTERVAL"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.Outbox.RecoveryInterval = i
+		}
+	}
+	if val := getEnv("OUTBOX_PENDING_TASK_MAX_AGE"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.Outbox.PendingTaskMaxAge = i
+		}
+	}
+	if val := getEnv("OUTBOX_BATCH_SIZE"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.Outbox.BatchSize = i
+		}
+	}
+	if val := getEnv("OUTBOX_MAX_RETRIES"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.Outbox.MaxRetries = i
+		}
+	}
 }
 
 // bindEnvVars 显式绑定所有环境变量，确保环境变量优先级最高
@@ -360,6 +395,12 @@ func bindEnvVars(v *viper.Viper) {
 	_ = v.BindEnv("observability.tracing.otlp_endpoint")
 	_ = v.BindEnv("observability.tracing.sampler")
 	_ = v.BindEnv("observability.tracing.sampler_ratio")
+
+	// Outbox
+	_ = v.BindEnv("outbox.recovery_interval")
+	_ = v.BindEnv("outbox.pending_task_max_age")
+	_ = v.BindEnv("outbox.batch_size")
+	_ = v.BindEnv("outbox.max_retries")
 }
 
 // LoadFromEnv 仅从环境变量加载配置
@@ -449,6 +490,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("observability.tracing.otlp_endpoint", "localhost:4317")
 	v.SetDefault("observability.tracing.sampler", "always_on")
 	v.SetDefault("observability.tracing.sampler_ratio", 1.0)
+
+	// Outbox 默认配置
+	v.SetDefault("outbox.recovery_interval", 30)
+	v.SetDefault("outbox.pending_task_max_age", 60)
+	v.SetDefault("outbox.batch_size", 10)
+	v.SetDefault("outbox.max_retries", 10)
 }
 
 // Address 返回服务器监听地址
