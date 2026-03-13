@@ -4,6 +4,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/storage"
@@ -24,6 +26,7 @@ var workerProviderSet = wire.NewSet(
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
 	provideTranscoderConfig,
+	provideOutboxConfig,
 )
 
 func InitializeWorker(cfg *config.Config) (*Worker, error) {
@@ -52,4 +55,13 @@ func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig 
 
 func provideTranscoderConfig(cfg *config.Config) config.TranscoderConfig {
 	return cfg.Transcoder
+}
+
+func provideOutboxConfig(cfg *config.Config) usecase.OutboxConfig {
+	return usecase.OutboxConfig{
+		RecoveryInterval:  time.Duration(cfg.Outbox.RecoveryInterval) * time.Second,
+		PendingTaskMaxAge: time.Duration(cfg.Outbox.PendingTaskMaxAge) * time.Minute,
+		BatchSize:         cfg.Outbox.BatchSize,
+		MaxRetries:        cfg.Outbox.MaxRetries,
+	}
 }
