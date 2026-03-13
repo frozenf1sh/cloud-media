@@ -228,6 +228,48 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 
 // WithTraceSpanContext 向上下文中添加 trace 和 span
 func WithTraceSpanContext(ctx context.Context, traceID, spanID string) context.Context {
+	// 如果已经有 trace，直接返回（安全检查，防止意外覆盖）
+	if trace.SpanFromContext(ctx).SpanContext().HasTraceID() {
+		return ctx
+	}
+
+	var tid trace.TraceID
+	var sid trace.SpanID
+	var err error
+
+	// 解析 trace ID
+	if traceID != "" {
+		tid, err = trace.TraceIDFromHex(traceID)
+		if err != nil {
+			return ctx
+		}
+	} else {
+		return ctx
+	}
+
+	// 解析 span ID
+	if spanID != "" {
+		sid, err = trace.SpanIDFromHex(spanID)
+		if err != nil {
+			// 如果 span ID 解析失败，生成一个随机的
+			sid = [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+		}
+	} else {
+		sid = [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	}
+
+	// 创建 span context
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: tid,
+		SpanID:  sid,
+		Remote:  true,
+	})
+	return trace.ContextWithSpanContext(ctx, sc)
+}
+
+// ForceWithTraceSpanContext 强制向上下文中添加 trace 和 span（即使已有 trace）
+// 注意：仅在明确需要覆盖时使用！
+func ForceWithTraceSpanContext(ctx context.Context, traceID, spanID string) context.Context {
 	var tid trace.TraceID
 	var sid trace.SpanID
 	var err error
