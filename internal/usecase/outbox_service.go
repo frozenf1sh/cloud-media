@@ -14,6 +14,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/uuid"
 	"github.com/google/wire"
+	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 )
 
@@ -215,15 +216,15 @@ func (s *OutboxService) PublishOutboxEvents(ctx context.Context) error {
 
 // publishSingleEvent 发布单个事件
 func (s *OutboxService) publishSingleEvent(ctx context.Context, event *domain.OutboxEvent) error {
-	// 从 OutboxEvent 恢复 trace 上下文
-	if event.TraceID != "" {
+	// 从 OutboxEvent 恢复 trace 上下文 - 仅当 ctx 没有 trace 时才恢复
+	if event.TraceID != "" && !trace.SpanFromContext(ctx).SpanContext().HasTraceID() {
 		ctx = telemetry.WithTraceSpanContext(ctx, event.TraceID, event.SpanID)
-		// 启动一个新的 span
-		ctx, _ = telemetry.StartSpan(ctx, "OutboxService.publishSingleEvent",
-			telemetry.String("event_id", event.EventID),
-			telemetry.String("aggregate_id", event.AggregateID),
-		)
 	}
+	// 启动一个新的 span
+	ctx, _ = telemetry.StartSpan(ctx, "OutboxService.publishSingleEvent",
+		telemetry.String("event_id", event.EventID),
+		telemetry.String("aggregate_id", event.AggregateID),
+	)
 
 	// 发布到消息队列
 	if err := s.broker.PublishWithConfirm(ctx, event); err != nil {
