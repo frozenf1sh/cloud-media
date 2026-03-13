@@ -159,6 +159,8 @@ type OutboxEventModel struct {
 	AggregateID   string    `gorm:"size:64;index"`
 	AggregateType string    `gorm:"size:64;index"`
 	Payload       []byte    `gorm:"type:bytea;not null"`
+	TraceID       string    `gorm:"size:64;index"`
+	SpanID        string    `gorm:"size:32;index"`
 	Status        string    `gorm:"size:32;index;not null"`
 	RetryCount    int       `gorm:"default:0"`
 	MaxRetries    int       `gorm:"default:10"`
@@ -181,6 +183,8 @@ func (m *OutboxEventModel) ToDomain() *domain.OutboxEvent {
 		AggregateID:   m.AggregateID,
 		AggregateType: m.AggregateType,
 		Payload:       append([]byte(nil), m.Payload...),
+		TraceID:       m.TraceID,
+		SpanID:        m.SpanID,
 		Status:        domain.OutboxEventStatus(m.Status),
 		RetryCount:    m.RetryCount,
 		MaxRetries:    m.MaxRetries,
@@ -199,6 +203,8 @@ func OutboxEventFromDomain(event *domain.OutboxEvent) *OutboxEventModel {
 		AggregateID:   event.AggregateID,
 		AggregateType: event.AggregateType,
 		Payload:       append([]byte(nil), event.Payload...),
+		TraceID:       event.TraceID,
+		SpanID:        event.SpanID,
 		Status:        string(event.Status),
 		RetryCount:    event.RetryCount,
 		MaxRetries:    event.MaxRetries,
