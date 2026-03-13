@@ -12,21 +12,21 @@ import (
 )
 
 // ProviderSet 是 Wire 的提供者集合
-var ProviderSet = wire.NewSet(NewVideoUseCase, WorkerProviderSet)
+var ProviderSet = wire.NewSet(NewVideoUseCase, WorkerProviderSet, OutboxServiceProviderSet)
 
 // VideoUseCase 视频处理用例
 type VideoUseCase struct {
-	mq         domain.MQBroker
-	repository domain.VideoTaskRepository
-	storage    domain.ObjectStorage
+	outboxService *OutboxService
+	repository    domain.VideoTaskRepository
+	storage       domain.ObjectStorage
 }
 
 // NewVideoUseCase 创建 VideoUseCase 实例
-func NewVideoUseCase(mq domain.MQBroker, repo domain.VideoTaskRepository, storage domain.ObjectStorage) *VideoUseCase {
+func NewVideoUseCase(outboxService *OutboxService, repo domain.VideoTaskRepository, storage domain.ObjectStorage) *VideoUseCase {
 	return &VideoUseCase{
-		mq:         mq,
-		repository: repo,
-		storage:    storage,
+		outboxService: outboxService,
+		repository:    repo,
+		storage:       storage,
 	}
 }
 
@@ -76,25 +76,10 @@ func (uc *VideoUseCase) SubmitTranscodeTask(ctx context.Context, taskID, sourceB
 		Status:       domain.TaskStatusPending,
 	}
 
-	// 4. 保存到数据库
-	if err := uc.repository.Create(ctx, task); err != nil {
+	// 4. 使用 Outbox Service 事务性保存和发布
+	if err := uc.outboxService.PublishVideoTaskTransactional(ctx, task); err != nil {
 		telemetry.RecordError(ctx, err)
-		return nil, errors.InternalWrap("failed to save task", err)
-	}
-
-	// 5. 更新状态为 queued
-	if err := uc.repository.UpdateStatus(ctx, taskID, domain.TaskStatusQueued); err != nil {
-		telemetry.RecordError(ctx, err)
-		return nil, errors.InternalWrap("failed to update task status", err)
-	}
-	task.Status = domain.TaskStatusQueued
-
-	// 6. 发布到消息队列
-	if err := uc.mq.PublishVideoTask(ctx, task); err != nil {
-		// 即使 MQ 发布失败，任务已经在数据库中，可以通过重试机制处理
-		telemetry.RecordError(ctx, err)
-		_ = uc.repository.UpdateStatus(ctx, taskID, domain.TaskStatusPending, "queue publish failed, pending retry")
-		// 不返回错误给客户端，因为任务已经持久化
+		return nil, errors.InternalWrap("failed to submit task", err)
 	}
 
 	logger.InfoContext(ctx, "Task submitted successfully",
