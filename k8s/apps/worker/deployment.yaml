@@ -36,12 +36,13 @@ spec:
                   - worker
               topologyKey: kubernetes.io/hostname
         nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 50
-            preference:
-              matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - fish-ubuntu
       tolerations:
       - key: node.kubernetes.io/not-ready
         operator: Exists

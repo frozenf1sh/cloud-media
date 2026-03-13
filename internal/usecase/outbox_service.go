@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/frozenf1sh/cloud-media/internal/domain"
+	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/google/uuid"
 	"github.com/google/wire"
+	"gorm.io/gorm"
 )
 
 // OutboxServiceProviderSet OutboxService 的 Wire 提供者集合
@@ -32,19 +34,20 @@ const (
 
 // OutboxService 事务性发件箱服务
 type OutboxService struct {
-	outboxRepo     domain.OutboxRepository
-	taskRepo       domain.VideoTaskRepository
-	msgRepo        domain.ProcessedMessageRepository
-	broker         domain.ReliableMQBroker
-	recoveryInterval time.Duration
+	outboxRepo        domain.OutboxRepository
+	taskRepo          domain.VideoTaskRepository
+	msgRepo           domain.ProcessedMessageRepository
+	broker            domain.ReliableMQBroker
+	db                *gorm.DB
+	recoveryInterval  time.Duration
 	pendingTaskMaxAge time.Duration
-	batchSize      int
-	maxRetries     int
+	batchSize         int
+	maxRetries        int
 
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	running        bool
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	running           bool
 }
 
 // NewOutboxService 创建 OutboxService 实例
@@ -53,20 +56,22 @@ func NewOutboxService(
 	taskRepo domain.VideoTaskRepository,
 	msgRepo domain.ProcessedMessageRepository,
 	broker domain.ReliableMQBroker,
+	db *persistence.Database,
 ) *OutboxService {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &OutboxService{
-		outboxRepo:     outboxRepo,
-		taskRepo:       taskRepo,
-		msgRepo:        msgRepo,
-		broker:         broker,
-		recoveryInterval: defaultRecoveryInterval,
+		outboxRepo:        outboxRepo,
+		taskRepo:          taskRepo,
+		msgRepo:           msgRepo,
+		broker:            broker,
+		db:                db.DB,
+		recoveryInterval:  defaultRecoveryInterval,
 		pendingTaskMaxAge: defaultPendingTaskMaxAge,
-		batchSize:      defaultBatchSize,
-		maxRetries:     defaultMaxRetries,
-		ctx:            ctx,
-		cancel:         cancel,
+		batchSize:         defaultBatchSize,
+		maxRetries:        defaultMaxRetries,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 }
 
@@ -119,7 +124,7 @@ func (s *OutboxService) Stop() error {
 }
 
 // PublishVideoTaskTransactional 事务性发布视频任务
-// 这个方法应该在同一个数据库事务中调用
+// 在同一个数据库事务中保存 video_task 和 outbox_event
 func (s *OutboxService) PublishVideoTaskTransactional(
 	ctx context.Context,
 	task *domain.VideoTask,
@@ -143,9 +148,29 @@ func (s *OutboxService) PublishVideoTaskTransactional(
 		CreatedAt:     time.Now(),
 	}
 
-	// 保存到 outbox 表
-	if err := s.outboxRepo.CreateOutboxEvent(ctx, event); err != nil {
-		return fmt.Errorf("failed to create outbox event: %w", err)
+	// 在同一个事务中保存 video_task 和 outbox_event
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 保存 video_task
+		taskModel := persistence.FromDomain(task)
+		if err := tx.Create(taskModel).Error; err != nil {
+			return fmt.Errorf("failed to create video task: %w", err)
+		}
+		// 回写 ID
+		task.ID = taskModel.ID
+
+		// 2. 保存 outbox_event
+		eventModel := persistence.OutboxEventFromDomain(event)
+		if err := tx.Create(eventModel).Error; err != nil {
+			return fmt.Errorf("failed to create outbox event: %w", err)
+		}
+		// 回写 ID
+		event.ID = eventModel.ID
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
 	logger.InfoContext(ctx, "Video task queued in outbox",
