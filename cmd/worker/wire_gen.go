@@ -14,6 +14,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/usecase"
 	"github.com/frozenf1sh/cloud-media/pkg/config"
 	"github.com/google/wire"
+	"time"
 )
 
 // Injectors from wire.go:
@@ -52,6 +53,7 @@ var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet,
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
 	provideTranscoderConfig,
+	provideOutboxConfig,
 )
 
 func provideRabbitMQURL(cfg *config.Config) string {
@@ -75,4 +77,13 @@ func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig 
 
 func provideTranscoderConfig(cfg *config.Config) config.TranscoderConfig {
 	return cfg.Transcoder
+}
+
+func provideOutboxConfig(cfg *config.Config) usecase.OutboxConfig {
+	return usecase.OutboxConfig{
+		RecoveryInterval:  time.Duration(cfg.Outbox.RecoveryInterval) * time.Second,
+		PendingTaskMaxAge: time.Duration(cfg.Outbox.PendingTaskMaxAge) * time.Minute,
+		BatchSize:         cfg.Outbox.BatchSize,
+		MaxRetries:        cfg.Outbox.MaxRetries,
+	}
 }

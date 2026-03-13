@@ -14,6 +14,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/usecase"
 	"github.com/frozenf1sh/cloud-media/pkg/config"
 	"github.com/google/wire"
+	"time"
 )
 
 // Injectors from wire.go:
@@ -33,7 +34,8 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 	database := persistence.NewDatabase(db)
-	outboxService := usecase.NewOutboxService(outboxRepository, videoTaskRepository, processedMessageRepository, rabbitMQBroker, database)
+	outboxConfig := provideOutboxConfig(cfg)
+	outboxService := usecase.NewOutboxService(outboxRepository, videoTaskRepository, processedMessageRepository, rabbitMQBroker, database, outboxConfig)
 	objectStorageConfig := provideObjectStorageConfig(cfg)
 	s3CompatStorage, err := storage.NewS3CompatStorage(objectStorageConfig)
 	if err != nil {
@@ -50,6 +52,7 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 var handlerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, usecase.ProviderSet, rpc.ProviderSet, provideRabbitMQURL,
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
+	provideOutboxConfig,
 )
 
 func provideRabbitMQURL(cfg *config.Config) string {
@@ -69,4 +72,13 @@ func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
 
 func provideObjectStorageConfig(cfg *config.Config) *config.ObjectStorageConfig {
 	return &cfg.ObjectStorage
+}
+
+func provideOutboxConfig(cfg *config.Config) usecase.OutboxConfig {
+	return usecase.OutboxConfig{
+		RecoveryInterval:  time.Duration(cfg.Outbox.RecoveryInterval) * time.Second,
+		PendingTaskMaxAge: time.Duration(cfg.Outbox.PendingTaskMaxAge) * time.Minute,
+		BatchSize:         cfg.Outbox.BatchSize,
+		MaxRetries:        cfg.Outbox.MaxRetries,
+	}
 }
