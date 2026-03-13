@@ -73,3 +73,9 @@ data:
         sampler: always_on
         sampler_ratio: 1.0
 
+    outbox:
+      recovery_interval: 30
+      pending_task_max_age: 60
+      batch_size: 10
+      max_retries: 10
+
