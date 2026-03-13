@@ -8,7 +8,7 @@
 ![Observability](https://img.shields.io/badge/Observability-OpenTelemetry-purple)
 ![License](https://img.shields.io/badge/License-Apache%202.0-green)
 
-**基于云原生架构的高并发视频处理平台**
+**云原生分布式视频处理平台**
 
 [特性概览](#-核心特性) • [架构设计](#-系统架构) • [快速开始](#-快速开始) • [API 文档](#-api-接口)
 
@@ -34,25 +34,33 @@
 *   **视频文件验证**：魔数检测 + FFprobe 双重验证，快速拒绝非视频文件，节约资源。
 *   **封面自动截取**：高效提取视频首帧作为预览缩略图。
 
+### 🛡️ 全链路可靠性保障
+*   **Transactional Outbox 模式**：消息先存入数据库（与任务同一事务），再异步发布，确保发布失败不丢消息。
+*   **RabbitMQ Publisher Confirms**：30秒超时等待 broker 确认，mandatory + returns 处理路由失败。
+*   **两层幂等消费保障**：`processed_messages` 去重表（唯一约束）+ SELECT FOR UPDATE 原子状态转换。
+*   **自动恢复机制**：定时扫描 pending 事件、stuck 任务，自动清理旧去重记录。
+*   **消息持久化**：消息 DeliveryMode=Persistent + 队列 durable，MQ 重启不丢消息。
+
 ### 🏗️ 云原生架构
 *   **Worker Pool + Queue 模式**：基于 RabbitMQ + KEDA 构建弹性 Worker 池，每个 Pod 单任务处理，支持 Scale-to-Zero。
 *   **异步削峰**：基于 RabbitMQ 构建高可靠任务队列，实现 API 层与计算层的彻底解耦。
 *   **多云存储支持**：支持 MinIO、AWS S3、Cloudflare R2 等多种 S3 兼容对象存储。
 *   **CDN 集成**：支持配置 CDN 加速，替代预签名 URL 提升访问速度。
 *   **内外网隔离存储**：设计 **双 Endpoint 模式**，Core Client 走内网流量上传，Signer Client 生成外网预签名 URL，提升安全性与传输效率。
-*   **双服务独立配置**：API Server 和 Worker 使用独立配置文件，支持不同的服务名和端口配置。
 *   **整洁架构**：严格遵循依赖倒置原则，层级分明（Domain/UseCase/Adapter/Infra），易于测试与维护。
-*   **Kubernetes 原生**：完整 k3s 部署配置，支持 Kustomize 分层部署。
+*   **Kubernetes 原生**：完整 k3s 部署配置，支持 Kustomize 分层部署，Pod 反亲和性 + 容忍度配置避免单点故障。
 
-### 🔭 极致可观测性
+### 🔭 可观测性体系
 *   **分布式追踪**：集成 OpenTelemetry + Grafana Tempo，实现跨 HTTP 与 AMQP 的 Context 传播，全链路 Trace 可视化。
 *   **Span 状态管理**：错误时自动设置 Span Status 为 Error，成功时设置为 OK，在 Grafana 中正确显示。
-*   **日志聚合**：Loki + Promtail + Grafana 日志栈，支持 trace_id 关联查询。
-*   **监控指标**：Prometheus Metrics 埋点，覆盖 API 延迟、队列堆积量、转码耗时等关键 SLI/SLO 指标。
+*   **日志聚合**：Loki + Grafana 日志栈，支持 trace_id 关联查询。
+*   **监控指标**：OpenTelemetry Metrics 埋点，覆盖 API 延迟、队列堆积量、转码耗时等关键 SLI/SLO 指标。
 *   **健康检查**：标准的 Kubernetes 探针接口（`/health/live`, `/health/ready`），Docker Compose 中已配置健康检查。
+*   **优雅降级**：traces/metrics 初始化失败时降级为 noop，不影响核心业务。
 
 ### 🛡️ 质量保障 (QA)
 *   **E2E 测试体系**：包含完整的端到端集成测试，自动生成可视化的 HTML 测试报告。
+*   **负载测试工具**：支持高并发任务提交、状态轮询、性能统计（P50/P95/P99、吞吐量）。
 *   **单元测试**：pkg/errors、pkg/ffmpeg、pkg/telemetry 等核心包完整测试覆盖。
 *   **统一错误处理**：pkg/errors 包提供统一的错误类型和错误码，支持 Connect RPC 错误映射。
 *   **CI/CD 流水线**：基于 GitHub Actions 实现自动化构建、测试与镜像推送。
@@ -131,8 +139,9 @@ cloud-media/
 │   └── infrastructure/   # 基础层 (DB驱动, MQ客户端, FFmpeg封装)
 ├── pkg/                  # 公共库 (Logger, Metrics, Interceptor)
 ├── proto/                # API 定义 (Protobuf)
-├── test/                 # E2E 测试与测试数据
-└── deploy/               # Docker & K8s 配置
+├── test/                 # E2E 测试与负载测试工具
+├── k8s/                  # Kubernetes 部署配置
+└── scripts/              # 开发辅助脚本
 ```
 
 ---
@@ -164,24 +173,19 @@ docker compose up -d
 | **MinIO Console** | `http://localhost:9001` | `rootadmin` / `rootpassword` |
 | **RabbitMQ** | `http://localhost:15672` | `guest` / `guest` |
 | **Grafana** | `http://localhost:3000` | `admin` / `password` |
-| **Tempo** (分布式追踪) | `http://localhost:3200` | - |
-
-> **Grafana 数据源配置**: 首次登录 Grafana 后，需手动添加 Loki (日志) 和 Tempo (追踪) 数据源。
 
 ### 配置文件
 
-API Server 和 Worker 使用独立的配置文件：
+配置模板位于 `config/` 目录：
 
 | 配置文件 | 说明 |
 | :--- | :--- |
-| `config.api-server.yaml.example` | API Server 配置模板 |
-| `config.worker.yaml.example` | Worker 配置模板 |
+| `config.api-server.example.yaml` | API Server 配置模板 |
+| `config.worker.example.yaml` | Worker 配置模板 |
 | `config.api-server.docker.yaml` | API Server Docker 环境配置 |
 | `config.worker.docker.yaml` | Worker Docker 环境配置 |
 
-主要配置差异：
-- **ServiceName**: API Server 使用 `cloud-media-api-server`，Worker 使用 `cloud-media-worker`
-- **Port**: API Server 使用 8080，Worker 使用 9090 提供健康检查和 metrics
+> **Kubernetes 部署**：k8s 环境中使用统一的 ConfigMap (`k8s/apps/common-configmap.yaml`)，通过环境变量覆盖服务特定配置。
 
 ### 开发脚本
 
@@ -192,19 +196,42 @@ API Server 和 Worker 使用独立的配置文件：
 | `./scripts/wiregen.sh` | 生成 Wire 依赖注入代码（api-server + worker） |
 | `./scripts/bufgen.sh` | 生成 Protobuf Connect RPC 代码 |
 | `./scripts/rebuild.sh` | 重新构建 Docker 镜像并重启服务 |
-| `./scripts/integration_test.sh` | 运行集成测试（服务检查 + 编译 + 单元测试） |
+| `./scripts/seal-secrets.sh` | 加密所有 Kubernetes Secrets |
 
-### 验证部署 (E2E Test)
+### 测试工具
+
+#### 端到端测试 (E2E)
 
 运行端到端测试以验证系统功能完整性：
 
 ```bash
-# 运行 E2E 测试工具
-go run ./test/e2e -video ./test/assets/sample.mp4
+go run ./test/e2e -video ./test/test.mp4
 
 # 测试完成后，打开生成的 test_result.html 查看可视化报告
 open test_result.html
 ```
+
+#### 负载测试
+
+使用负载测试工具进行高并发压测：
+
+```bash
+# 基本用法
+go run ./test/loadtest -video ./test/test.mp4 -count 200 -concurrency 10
+
+# 上传复用模式（只上传一次文件，所有任务复用）
+go run ./test/loadtest -video ./test/test.mp4 -count 200 -reuse-upload
+
+# 指定 k8s API 地址
+go run ./test/loadtest -video ./test/test.mp4 -api-addr http://media-api.frozenf1sh.loc/
+```
+
+负载测试输出包含：
+- 任务提交成功率
+- 吞吐量 (tasks/sec)
+- 队列时间统计 (P50/P95/P99)
+- 处理时间统计 (P50/P95/P99)
+- 失败任务详情
 
 ### Kubernetes (k3s) 部署
 
@@ -226,17 +253,25 @@ kubectl apply -k k8s/
 kubectl get pods -n cloud-media -w
 ```
 
-**详细文档**:
-- `k8s/DEPLOYMENT_GUIDE.md` - 完全重新部署指南
-- `k8s/SECRETS_REQUIREMENTS.md` - 各服务密钥需求清单
-
 ---
 
 ## 🔌 API 接口
 
 服务采用 Protobuf 定义，支持 gRPC 与 HTTP/JSON 调用。
 
-### 1. 提交转码任务
+### 1. 获取上传地址
+
+```bash
+curl -X POST http://localhost:8080/api.v1.VideoService/GetUploadURL \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "demo-task-01",
+    "file_name": "demo.mp4",
+    "file_size": 10485760
+  }'
+```
+
+### 2. 提交转码任务
 
 ```bash
 curl -X POST http://localhost:8080/api.v1.VideoService/SubmitTask \
@@ -248,7 +283,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/SubmitTask \
   }'
 ```
 
-### 2. 查询任务状态
+### 3. 查询任务状态
 
 ```bash
 curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
@@ -260,7 +295,7 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 
 ---
 
-## 💡 设计亮点详解
+## 💡 设计亮点
 
 ### 多云存储与 CDN 集成
 系统采用**抽象接口 + 实现分离**设计：
@@ -283,92 +318,12 @@ curl -X POST http://localhost:8080/api.v1.VideoService/GetTaskStatus \
 
 ---
 
-## 🛣️ 路线图 (Roadmap)
+## 🔮 未来规划
 
-### 已完成
-*   [x] **基础架构**: Clean Architecture, DI (Wire), GORM, Viper
-*   [x] **核心功能**: 视频上传, HLS 切片, 封面生成
-*   [x] **异步处理**: RabbitMQ 集成与死信队列处理
-*   [x] **可观测性**: Metrics & Tracing (Otel) + LGTM Stack (Loki/Tempo/Mimir)
-*   [x] **多云存储**: MinIO / AWS S3 / Cloudflare R2 支持
-*   [x] **CDN 集成**: CDN URL 支持
-*   [x] **CI/CD**: GitHub Actions 自动构建
-*   [x] **双服务独立配置**: API Server 和 Worker 使用独立配置文件
-*   [x] **Docker Compose 健康检查**: 两个服务都配置了健康检查
-*   [x] **统一错误处理**: pkg/errors 包，视频文件验证，边界情况处理
-*   [x] **OTel Span 状态**: 错误时设置 Span Status 为 Error，成功时设置为 OK
-*   [x] **单元测试**: pkg/errors、pkg/ffmpeg、pkg/telemetry 完整测试覆盖
-*   [x] **可配置转码参数**: FFmpeg 所有硬编码参数现在可配置
-*   [x] **Kubernetes 部署**: 完整 k3s 部署配置（k8s/ 目录）
-*   [x] **KEDA 动态扩缩容**: 基于 RabbitMQ 队列长度 + CPU 使用率，支持 Scale-to-Zero
-*   [x] **Worker 幂等性**: 数据库事务 + SELECT FOR UPDATE 原子性状态转换
-*   [x] **preStop 智能等待**: /status 端点 + 脚本等待活动任务完成
-*   [x] **可观测性优雅降级**: traces/metrics 初始化失败时降级为 noop
-*   [x] **自动创建 Bucket**: API Server 和 Worker 启动时自动创建 media-input/media-output
-*   [x] **Sealed Secrets 密钥管理**: 使用 Bitnami Sealed Secrets 安全管理所有 Kubernetes Secret，支持安全提交到 Git
-*   [x] **部署指南**: 完整的 k8s 重新部署指南和密钥需求清单
-*   [x] **压力测试与调优**: 8核 AMD R9 7940H 上的性能测试，发现 Pod 数量与单任务性能的最佳平衡点
-
-### 进行中
 *   [ ] **GPU 加速**: 集成 NVENC 硬件转码支持
 *   [ ] **WebHook**: 任务完成回调通知
-*   [ ] **性能调优**: 基于压力测试结果的进一步优化
-
-### 未来规划
 *   [ ] **大视频分片上传**: S3 Multipart Upload 支持，断点续传
 *   [ ] **管道流处理**: 使用 io.Pipe 边下边转码，减少磁盘 I/O
-
----
-
-## 📊 性能测试与调优
-
-### 压力测试结果 (AMD R9 7940H, 8核)
-
-测试环境:
-- **CPU**: AMD Ryzen 9 7940H (8核16线程)
-- **测试负载**: 200个视频转码任务
-- **测试视频**: 约10秒短视频
-
-| 配置 | Max Pods=10 | Max Pods=6 |
-| :--- | :--- | :--- |
-| **吞吐量 (Throughput)** | 2.17 tasks/sec | **1.81 tasks/sec** ⬇️ |
-| **平均处理时间** | 3.96s | **2.84s** ⬇️ **(快 28%)** |
-| **P50 处理时间** | - | 2.06s |
-| **P95 处理时间** | - | 4.09s |
-| **P99 处理时间** | - | 4.21s |
-| **总耗时** | - | 1m50s |
-| **成功率** | 100% | 100% |
-
-### 关键发现
-
-1. **资源争用现象**:
-   - 当 Pod 数从 10 降到 6，虽然总吞吐量略降，但单任务处理速度显著提升 28%
-   - 原因：过多 Pod 同时运行 FFmpeg 导致 CPU 缓存失效、上下文切换开销增大
-
-2. **最佳平衡点**:
-   - 对于 8 核 CPU，Max Pods=6 似乎是更好的选择
-   - 每个任务获得更多专用 CPU 时间，用户体验更好（更快完成单个任务）
-
-3. **队列等待时间**:
-   - P95 队列等待时间: 1m42s
-   - 系统需要在"快的单个任务"和"少的队列等待"之间权衡
-
-### 调优建议
-
-**KEDA ScaledObject 配置**:
-```yaml
-maxReplicaCount: 6  # 根据 CPU 核心数调整 (核数 × 0.75)
-advanced:
-  horizontalPodAutoscalerConfig:
-    behavior:
-      scaleDown:
-        stabilizationWindowSeconds: 1800  # 30分钟稳定窗口
-```
-
-**后续优化方向**:
-- [ ] 考虑 Pod CPU 资源限制 (requests/limits)
-- [ ] 测试不同 FFmpeg preset 对性能的影响
-- [ ] 添加基于队列等待时间的自动调优
 
 ---
 
