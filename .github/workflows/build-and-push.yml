@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/*
     tags:
       - 'v*'
     # 路径过滤：如果只修改了文档或 k8s 配置，不触发构建
@@ -11,6 +12,7 @@ on:
       - '**.md'
       - '.gitignore'
       - 'docs/**'
+      - 'doc/**'
       - 'k8s/**'
   pull_request:
     branches:
@@ -20,7 +22,15 @@ on:
       - '**.md'
       - '.gitignore'
       - 'docs/**'
+      - 'doc/**'
       - 'k8s/**'
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "触发原因（可选）"
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
