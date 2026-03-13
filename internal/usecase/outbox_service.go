@@ -22,16 +22,13 @@ var OutboxServiceProviderSet = wire.NewSet(
 	NewOutboxService,
 )
 
-const (
-	// 默认最大重试次数
-	defaultMaxRetries = 10
-	// 默认恢复扫描间隔
-	defaultRecoveryInterval = 30 * time.Second
-	// 默认待处理任务最大存活时间
-	defaultPendingTaskMaxAge = 1 * time.Hour
-	// 批量处理大小
-	defaultBatchSize = 10
-)
+// OutboxConfig OutboxService 配置
+type OutboxConfig struct {
+	RecoveryInterval  time.Duration
+	PendingTaskMaxAge time.Duration
+	BatchSize         int
+	MaxRetries        int
+}
 
 // OutboxService 事务性发件箱服务
 type OutboxService struct {
@@ -58,6 +55,7 @@ func NewOutboxService(
 	msgRepo domain.ProcessedMessageRepository,
 	broker domain.ReliableMQBroker,
 	db *persistence.Database,
+	cfg OutboxConfig,
 ) *OutboxService {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -67,10 +65,10 @@ func NewOutboxService(
 		msgRepo:           msgRepo,
 		broker:            broker,
 		db:                db.DB,
-		recoveryInterval:  defaultRecoveryInterval,
-		pendingTaskMaxAge: defaultPendingTaskMaxAge,
-		batchSize:         defaultBatchSize,
-		maxRetries:        defaultMaxRetries,
+		recoveryInterval:  cfg.RecoveryInterval,
+		pendingTaskMaxAge: cfg.PendingTaskMaxAge,
+		batchSize:         cfg.BatchSize,
+		maxRetries:        cfg.MaxRetries,
 		ctx:               ctx,
 		cancel:            cancel,
 	}
