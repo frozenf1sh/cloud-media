@@ -11,8 +11,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: api-server
@@ -23,17 +23,19 @@ spec:
     spec:
       # 重启策略：始终重启
       restartPolicy: Always
-      # Pod 反亲和性：确保 api-server Pod 分散在不同节点
+      # Pod 反亲和性：尽量分散在不同节点（preferred而非required，避免rollout时调度失败）
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - api-server
-            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - api-server
+              topologyKey: kubernetes.io/hostname
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
           - weight: 50
@@ -54,7 +56,7 @@ spec:
       containers:
         - name: api-server
           image: ghcr.io/frozenf1sh/cloud-media-api-server:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               protocol: TCP
