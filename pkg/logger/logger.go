@@ -1,3 +1,4 @@
+
 package logger
 
 import (
@@ -5,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"go.opentelemetry.io/otel/trace"
@@ -220,6 +222,16 @@ func Bool(key string, value bool) slog.Attr {
 // Any 创建任意类型属性
 func Any(key string, value any) slog.Attr {
 	return slog.Any(key, value)
+}
+
+// Uint64 创建 uint64 属性
+func Uint64(key string, value uint64) slog.Attr {
+	return slog.Uint64(key, value)
+}
+
+// Duration 创建 duration 属性
+func Duration(key string, value time.Duration) slog.Attr {
+	return slog.Duration(key, value)
 }
 
 // 兼容旧接口的函数
