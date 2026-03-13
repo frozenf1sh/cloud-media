@@ -15,6 +15,16 @@ spec:
       labels:
         app: rabbitmq
     spec:
+      restartPolicy: Always
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
       containers:
         - name: rabbitmq
           image: rabbitmq:3-management-alpine
@@ -43,29 +53,41 @@ spec:
               subPath: rabbitmq
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "256Mi"
+              cpu: "200m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "1Gi"
+              cpu: "1000m"
+          startupProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - check_running
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
           livenessProbe:
             exec:
               command:
                 - rabbitmq-diagnostics
                 - -q
                 - check_running
-            initialDelaySeconds: 60
-            periodSeconds: 30
+            initialDelaySeconds: 0
+            periodSeconds: 20
             timeoutSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             exec:
               command:
                 - rabbitmq-diagnostics
                 - -q
                 - check_running
-            initialDelaySeconds: 20
+            initialDelaySeconds: 0
             periodSeconds: 10
             timeoutSeconds: 5
+            failureThreshold: 2
       volumes:
         - name: rabbitmq-storage
           persistentVolumeClaim:

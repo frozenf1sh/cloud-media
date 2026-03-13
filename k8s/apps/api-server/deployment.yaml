@@ -8,6 +8,11 @@ metadata:
     app: api-server
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: api-server
@@ -16,19 +21,36 @@ spec:
       labels:
         app: api-server
     spec:
+      # 重启策略：始终重启
+      restartPolicy: Always
       # Pod 反亲和性：确保 api-server Pod 分散在不同节点
       affinity:
         podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - api-server
+            topologyKey: kubernetes.io/hostname
+        nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - api-server
-              topologyKey: kubernetes.io/hostname
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      # 容忍度：允许调度到有污点的节点
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
       containers:
         - name: api-server
           image: ghcr.io/frozenf1sh/cloud-media-api-server:latest
@@ -84,20 +106,24 @@ spec:
             httpGet:
               path: /health/ready
               port: 8080
-            failureThreshold: 30    # 最多给 30 次机会
-            periodSeconds: 1        # 每秒查一次，起得快就秒过，起得慢（如 DB 还没好）就死等
+            failureThreshold: 30
+            periodSeconds: 1
           livenessProbe:
             httpGet:
               path: /health/live
               port: 8080
-            initialDelaySeconds: 0  # 已经被 StartupProbe 保护了
-            periodSeconds: 20
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 8080
             initialDelaySeconds: 0
             periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 3
       volumes:
         - name: config-volume
           configMap:
