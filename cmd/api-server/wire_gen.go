@@ -19,26 +19,29 @@ import (
 // Injectors from wire.go:
 
 func InitializeVideoServer(cfg *config.Config) (*Server, error) {
-	string2 := provideRabbitMQURL(cfg)
-	rabbitMQBroker, err := broker.NewRabbitMQBroker(string2)
-	if err != nil {
-		return nil, err
-	}
 	persistenceConfig := provideDatabaseConfig(cfg)
 	db, err := persistence.NewGormDB(persistenceConfig)
 	if err != nil {
 		return nil, err
 	}
+	outboxRepository := persistence.NewOutboxRepository(db)
 	videoTaskRepository := persistence.NewVideoTaskRepository(db)
+	processedMessageRepository := persistence.NewProcessedMessageRepository(db)
+	string2 := provideRabbitMQURL(cfg)
+	rabbitMQBroker, err := broker.NewRabbitMQBroker(string2)
+	if err != nil {
+		return nil, err
+	}
+	outboxService := usecase.NewOutboxService(outboxRepository, videoTaskRepository, processedMessageRepository, rabbitMQBroker)
 	objectStorageConfig := provideObjectStorageConfig(cfg)
 	s3CompatStorage, err := storage.NewS3CompatStorage(objectStorageConfig)
 	if err != nil {
 		return nil, err
 	}
-	videoUseCase := usecase.NewVideoUseCase(rabbitMQBroker, videoTaskRepository, s3CompatStorage)
+	videoUseCase := usecase.NewVideoUseCase(outboxService, videoTaskRepository, s3CompatStorage)
 	videoServer := rpc.NewVideoServer(videoUseCase)
 	database := persistence.NewDatabase(db)
-	server := NewServer(videoServer, database, s3CompatStorage)
+	server := NewServer(videoServer, database, s3CompatStorage, outboxService)
 	return server, nil
 }
 

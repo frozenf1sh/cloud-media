@@ -7,6 +7,7 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/adapter/rpc"
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
+	"github.com/frozenf1sh/cloud-media/internal/usecase"
 	"github.com/frozenf1sh/cloud-media/pkg/health"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	v1connect "github.com/frozenf1sh/cloud-media/proto/gen/api/v1/v1connect"
@@ -14,14 +15,15 @@ import (
 
 // Server 持有 HTTP handler 和路径
 type Server struct {
-	Path     string
-	Handler  http.Handler
-	Database *persistence.Database
-	Health   *health.Health
+	Path          string
+	Handler       http.Handler
+	Database      *persistence.Database
+	Health        *health.Health
+	OutboxService *usecase.OutboxService
 }
 
 // NewServer 创建服务器
-func NewServer(videoServer *rpc.VideoServer, db *persistence.Database, storage domain.ObjectStorage) *Server {
+func NewServer(videoServer *rpc.VideoServer, db *persistence.Database, storage domain.ObjectStorage, outboxService *usecase.OutboxService) *Server {
 	path, handler := v1connect.NewVideoServiceHandler(videoServer)
 
 	// 执行自动迁移
@@ -57,9 +59,10 @@ func NewServer(videoServer *rpc.VideoServer, db *persistence.Database, storage d
 	}))
 
 	return &Server{
-		Path:     path,
-		Handler:  handler,
-		Database: db,
-		Health:   healthChecker,
+		Path:          path,
+		Handler:       handler,
+		Database:      db,
+		Health:        healthChecker,
+		OutboxService: outboxService,
 	}
 }

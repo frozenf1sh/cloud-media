@@ -91,6 +91,18 @@ func main() {
 
 	logger.Info("Service path", logger.String("path", server.Path))
 
+	// 6. 启动 Outbox Service 后台循环
+	outboxCtx, outboxCancel := context.WithCancel(context.Background())
+	go func() {
+		logger.Info("Starting Outbox Service background loop")
+		server.OutboxService.Start(outboxCtx)
+		logger.Info("Outbox Service stopped")
+	}()
+	defer func() {
+		logger.Info("Stopping Outbox Service...")
+		outboxCancel()
+	}()
+
 	// 6. 注册路由并启动 HTTP 服务器
 	mux := http.NewServeMux()
 	mux.Handle(server.Path, server.Handler)
