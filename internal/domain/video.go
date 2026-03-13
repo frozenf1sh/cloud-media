@@ -1,8 +1,10 @@
+
 package domain
 
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // VideoTaskStatus 任务状态类型
@@ -15,6 +17,15 @@ const (
 	TaskStatusSuccess    VideoTaskStatus = "success"
 	TaskStatusFailed     VideoTaskStatus = "failed"
 	TaskStatusCancelled  VideoTaskStatus = "cancelled"
+)
+
+// OutboxEventStatus Outbox 事件状态
+type OutboxEventStatus string
+
+const (
+	OutboxStatusPending   OutboxEventStatus = "pending"
+	OutboxStatusPublished OutboxEventStatus = "published"
+	OutboxStatusFailed    OutboxEventStatus = "failed"
 )
 
 // VideoTask 视频转码任务领域模型
@@ -94,6 +105,30 @@ type TaskStatusLog struct {
 	CreatedAt  int64
 }
 
+// OutboxEvent Outbox 事件（用于 Transactional Outbox 模式）
+type OutboxEvent struct {
+	ID            uint
+	EventID       string           // 唯一事件 ID（用于幂等）
+	EventType     string           // 事件类型
+	AggregateID   string           // 聚合 ID（如 task_id）
+	AggregateType string           // 聚合类型（如 "video_task"）
+	Payload       []byte           // 事件内容（JSON）
+	Status        OutboxEventStatus
+	RetryCount    int              // 重试次数
+	MaxRetries    int              // 最大重试次数
+	LastError     string           // 最后一次错误信息
+	CreatedAt     time.Time
+	ProcessedAt   *time.Time
+}
+
+// ProcessedMessage 已处理消息记录（用于去重/幂等消费）
+type ProcessedMessage struct {
+	ID          uint
+	MessageID   string    // 消息唯一 ID
+	ConsumerID  string    // 消费者 ID（区分不同服务/消费者）
+	ProcessedAt time.Time // 处理时间
+}
+
 // VideoTaskRepository 任务仓储接口
 type VideoTaskRepository interface {
 	Create(ctx context.Context, task *VideoTask) error
@@ -105,11 +140,47 @@ type VideoTaskRepository interface {
 	// TryTransitionToProcessing 原子性地尝试将任务从 pending/queued 转换为 processing
 	// 返回值: 成功时返回更新后的任务，失败时返回错误
 	TryTransitionToProcessing(ctx context.Context, taskID string) (*VideoTask, error)
+	// ListPendingTasks 列出所有 pending/queued 状态的任务（用于恢复）
+	ListPendingTasks(ctx context.Context, maxAge time.Duration) ([]*VideoTask, error)
+}
+
+// OutboxRepository Outbox 仓储接口
+type OutboxRepository interface {
+	// CreateOutboxEvent 创建 outbox 事件（在同一个事务中）
+	CreateOutboxEvent(ctx context.Context, event *OutboxEvent) error
+	// GetPendingEvents 获取待发布的事件
+	GetPendingEvents(ctx context.Context, limit int) ([]*OutboxEvent, error)
+	// MarkAsPublished 标记事件为已发布
+	MarkAsPublished(ctx context.Context, eventID string) error
+	// MarkAsFailed 标记事件为失败
+	MarkAsFailed(ctx context.Context, eventID string, err string) error
+	// IncrementRetry 增加重试计数
+	IncrementRetry(ctx context.Context, eventID string, err string) error
+}
+
+// ProcessedMessageRepository 已处理消息仓储接口
+type ProcessedMessageRepository interface {
+	// TryMarkAsProcessed 尝试标记消息为已处理（原子操作，返回是否成功）
+	// 如果消息已处理过，返回 false
+	TryMarkAsProcessed(ctx context.Context, messageID, consumerID string) (bool, error)
+	// CleanupOldEntries 清理旧记录
+	CleanupOldEntries(ctx context.Context, olderThan time.Duration) error
 }
 
 // MQBroker 消息队列接口
 type MQBroker interface {
 	PublishVideoTask(ctx context.Context, task *VideoTask) error
+}
+
+// ReliableMQBroker 可靠消息队列接口（支持发布确认）
+type ReliableMQBroker interface {
+	MQBroker
+	// PublishWithConfirm 带确认的发布
+	PublishWithConfirm(ctx context.Context, event *OutboxEvent) error
+	// Start 启动连接和确认监听
+	Start(ctx context.Context) error
+	// Stop 停止
+	Stop() error
 }
 
 // ObjectStorage 对象存储接口 - 支持 MinIO、S3、阿里云 OSS 等
@@ -164,13 +235,13 @@ type Transcoder interface {
 
 // VideoInfo 视频信息
 type VideoInfo struct {
-	Duration  float64 // 时长（秒）
-	Width     int     // 宽度
-	Height    int     // 高度
-	Rotation  int     // 旋转角度（0, 90, 180, 270）
-	Codec     string  // 视频编码
-	Bitrate   int64   // 码率（bps）
-	FPS       float64 // 帧率
-	AudioCodec string // 音频编码
-	FileSize  int64   // 文件大小（字节）
+	Duration   float64 // 时长（秒）
+	Width      int     // 宽度
+	Height     int     // 高度
+	Rotation   int     // 旋转角度（0, 90, 180, 270）
+	Codec      string  // 视频编码
+	Bitrate    int64   // 码率（bps）
+	FPS        float64 // 帧率
+	AudioCodec string  // 音频编码
+	FileSize   int64   // 文件大小（字节）
 }

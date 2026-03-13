@@ -1,3 +1,4 @@
+
 package persistence
 
 import (
@@ -150,6 +151,81 @@ func (m *TaskStatusLogModel) ToDomain() *domain.TaskStatusLog {
 	}
 }
 
+// OutboxEventModel GORM 模型 - 对应 outbox_events 表（Transactional Outbox 模式）
+type OutboxEventModel struct {
+	ID            uint      `gorm:"primaryKey;autoIncrement"`
+	EventID       string    `gorm:"size:64;uniqueIndex;not null"`
+	EventType     string    `gorm:"size:64;not null;index"`
+	AggregateID   string    `gorm:"size:64;index"`
+	AggregateType string    `gorm:"size:64;index"`
+	Payload       []byte    `gorm:"type:bytea;not null"`
+	Status        string    `gorm:"size:32;index;not null"`
+	RetryCount    int       `gorm:"default:0"`
+	MaxRetries    int       `gorm:"default:10"`
+	LastError     string    `gorm:"type:text"`
+	CreatedAt     time.Time `gorm:"index"`
+	ProcessedAt   *time.Time
+}
+
+// TableName 指定表名
+func (OutboxEventModel) TableName() string {
+	return "outbox_events"
+}
+
+// ToDomain 转换为领域模型
+func (m *OutboxEventModel) ToDomain() *domain.OutboxEvent {
+	return &domain.OutboxEvent{
+		ID:            m.ID,
+		EventID:       m.EventID,
+		EventType:     m.EventType,
+		AggregateID:   m.AggregateID,
+		AggregateType: m.AggregateType,
+		Payload:       append([]byte(nil), m.Payload...),
+		Status:        domain.OutboxEventStatus(m.Status),
+		RetryCount:    m.RetryCount,
+		MaxRetries:    m.MaxRetries,
+		LastError:     m.LastError,
+		CreatedAt:     m.CreatedAt,
+		ProcessedAt:   m.ProcessedAt,
+	}
+}
+
+// OutboxEventFromDomain 从领域模型创建 GORM 模型
+func OutboxEventFromDomain(event *domain.OutboxEvent) *OutboxEventModel {
+	return &OutboxEventModel{
+		ID:            event.ID,
+		EventID:       event.EventID,
+		EventType:     event.EventType,
+		AggregateID:   event.AggregateID,
+		AggregateType: event.AggregateType,
+		Payload:       append([]byte(nil), event.Payload...),
+		Status:        string(event.Status),
+		RetryCount:    event.RetryCount,
+		MaxRetries:    event.MaxRetries,
+		LastError:     event.LastError,
+		CreatedAt:     event.CreatedAt,
+		ProcessedAt:   event.ProcessedAt,
+	}
+}
+
+// ProcessedMessageModel GORM 模型 - 对应 processed_messages 表（用于去重）
+type ProcessedMessageModel struct {
+	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	MessageID   string    `gorm:"size:128;not null"`
+	ConsumerID  string    `gorm:"size:128;not null"`
+	ProcessedAt time.Time `gorm:"not null"`
+}
+
+// TableName 指定表名
+func (ProcessedMessageModel) TableName() string {
+	return "processed_messages"
+}
+
+// 复合唯一索引：message_id + consumer_id
+func (ProcessedMessageModel) UniqueIndex() [2]string {
+	return [2]string{"message_id", "consumer_id"}
+}
+
 // Database 数据库封装
 type Database struct {
 	DB *gorm.DB
@@ -162,8 +238,18 @@ func NewDatabase(db *gorm.DB) *Database {
 
 // AutoMigrate 自动迁移表结构
 func (d *Database) AutoMigrate() error {
+	// 先创建复合唯一索引
+	if err := d.DB.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_messages_msg_consumer
+		ON processed_messages(message_id, consumer_id)
+	`).Error; err != nil {
+		// 索引可能已存在，忽略错误
+	}
+
 	return d.DB.AutoMigrate(
 		&VideoTaskModel{},
 		&TaskStatusLogModel{},
+		&OutboxEventModel{},
+		&ProcessedMessageModel{},
 	)
 }
