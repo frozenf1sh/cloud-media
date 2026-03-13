@@ -8,6 +8,11 @@ metadata:
     app: worker
 spec:
   replicas: 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: worker
@@ -16,7 +21,36 @@ spec:
       labels:
         app: worker
     spec:
-      terminationGracePeriodSeconds: 3600  # 1 小时最大等待时间（一般视频不需要2小时）
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 3600
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - worker
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 3600
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 3600
       containers:
         - name: worker
           image: ghcr.io/frozenf1sh/cloud-media-worker:latest
@@ -74,34 +108,29 @@ spec:
           lifecycle:
             preStop:
               exec:
-                # preStop hook: 检查 /status 端点，等待活动任务完成或超时
                 command: ["/bin/sh", "/scripts/prestop.sh"]
-          # 启动探针
           startupProbe:
             httpGet:
               path: /health/ready
               port: 8080
-            initialDelaySeconds: 1 
+            initialDelaySeconds: 1
             periodSeconds: 1
             failureThreshold: 30
-          # 就绪探针
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 8080
-            # 因为有了 startupProbe，这里不需要 initialDelay
-            initialDelaySeconds: 0 
+            initialDelaySeconds: 0
             periodSeconds: 2
             timeoutSeconds: 3
             successThreshold: 1
             failureThreshold: 3
-          # 存活探针
           livenessProbe:
             httpGet:
               path: /health/live
               port: 8080
             initialDelaySeconds: 0
-            periodSeconds: 15
+            periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
       volumes:

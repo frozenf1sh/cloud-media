@@ -15,6 +15,16 @@ spec:
       labels:
         app: minio
     spec:
+      restartPolicy: Always
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
       containers:
         - name: minio
           image: minio/minio:RELEASE.2025-03-12T18-04-18Z
@@ -48,27 +58,38 @@ spec:
               mountPath: /data
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "512Mi"
+              cpu: "200m"
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "2Gi"
+              cpu: "2000m"
+          startupProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /minio/health/live
               port: 9000
               scheme: HTTP
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 20
             timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /minio/health/ready
               port: 9000
               scheme: HTTP
-            initialDelaySeconds: 10
+            initialDelaySeconds: 0
             periodSeconds: 10
             timeoutSeconds: 3
+            failureThreshold: 2
       volumes:
         - name: minio-storage
           persistentVolumeClaim:

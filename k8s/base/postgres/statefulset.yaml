@@ -15,6 +15,16 @@ spec:
       labels:
         app: postgres
     spec:
+      restartPolicy: Always
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 600
       containers:
         - name: postgres
           image: postgres:17-alpine
@@ -45,21 +55,12 @@ spec:
               subPath: postgres
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "256Mi"
+              cpu: "200m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - postgres
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-          readinessProbe:
+              memory: "1Gi"
+              cpu: "1000m"
+          startupProbe:
             exec:
               command:
                 - pg_isready
@@ -67,7 +68,28 @@ spec:
                 - postgres
             initialDelaySeconds: 5
             periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 0
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 0
+            periodSeconds: 10
             timeoutSeconds: 3
+            failureThreshold: 2
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
