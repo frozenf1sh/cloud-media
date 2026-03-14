@@ -108,6 +108,8 @@ type TranscoderConfig struct {
 	GOPSize int `mapstructure:"gop_size"`
 	// ThumbnailSize 封面最大尺寸
 	ThumbnailSize int `mapstructure:"thumbnail_size"`
+	// ThreadCount FFmpeg 使用的线程数（0=自动）
+	ThreadCount int `mapstructure:"thread_count"`
 	// TimeoutMultiplier 超时倍数（视频时长 × 此倍数）
 	TimeoutMultiplier float64 `mapstructure:"timeout_multiplier"`
 	// MinTimeout 最小超时时间（分钟）
@@ -349,6 +351,13 @@ func overrideFromEnv(cfg *Config) {
 			cfg.Outbox.MaxRetries = i
 		}
 	}
+
+	// Transcoder
+	if val := getEnv("TRANSCODER_THREAD_COUNT"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.Transcoder.ThreadCount = i
+		}
+	}
 }
 
 // bindEnvVars 显式绑定所有环境变量，确保环境变量优先级最高
@@ -395,6 +404,9 @@ func bindEnvVars(v *viper.Viper) {
 	_ = v.BindEnv("observability.tracing.otlp_endpoint")
 	_ = v.BindEnv("observability.tracing.sampler")
 	_ = v.BindEnv("observability.tracing.sampler_ratio")
+
+	// Transcoder
+	_ = v.BindEnv("transcoder.thread_count")
 
 	// Outbox
 	_ = v.BindEnv("outbox.recovery_interval")
@@ -466,6 +478,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("transcoder.preset", "fast")
 	v.SetDefault("transcoder.gop_size", 48)
 	v.SetDefault("transcoder.thumbnail_size", 1080)
+	v.SetDefault("transcoder.thread_count", 0) // 0 = 自动
 	v.SetDefault("transcoder.timeout_multiplier", 3.0)
 	v.SetDefault("transcoder.min_timeout", 10)
 	v.SetDefault("transcoder.max_timeout", 120)

@@ -9,7 +9,7 @@ spec:
   pollingInterval: 5            # 优化：缩短轮询间隔，让扩容反应更快（默认30s，视频处理建议更敏捷）
   cooldownPeriod: 60            # 优化：缩短 KEDA 自身的冷却时间，依赖 HPA 的稳定窗口控制
   minReplicaCount: 0            # 允许缩容到 0
-  maxReplicaCount: 5            # 根据你的资源配额设定
+  maxReplicaCount: 4            # R9 7940H: 4 Pods × 2核 = 8核满载(短视频/高并发优化)
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
