@@ -55,7 +55,7 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/frozenf1sh/cloud-media-worker:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               protocol: TCP
@@ -101,10 +101,10 @@ spec:
               subPath: prestop.sh
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "1500m"
-            limits:
               memory: "2Gi"
+              cpu: "2000m"
+            limits:
+              memory: "3Gi"
               cpu: "2000m"
           lifecycle:
             preStop:

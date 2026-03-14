@@ -265,9 +265,17 @@ func (t *FFmpegTranscoder) transcodeAllVariants(
 	args := []string{
 		"-y",
 		"-noautorotate",
+	}
+
+	// 添加线程数限制（如果配置了）
+	if t.cfg.ThreadCount > 0 {
+		args = append(args, "-threads", fmt.Sprintf("%d", t.cfg.ThreadCount))
+	}
+
+	args = append(args,
 		"-i", inputPath,
 		"-filter_complex", filtergraph,
-	}
+	)
 
 	// 添加每个输出的参数
 	for i, vc := range variantConfigs {
@@ -500,25 +508,41 @@ func (t *FFmpegTranscoder) GenerateThumbnail(ctx context.Context, inputPath stri
 		args = []string{
 			"-y",
 			"-noautorotate", // 禁用自动旋转
+		}
+
+		// 添加线程数限制（如果配置了）
+		if t.cfg.ThreadCount > 0 {
+			args = append(args, "-threads", fmt.Sprintf("%d", t.cfg.ThreadCount))
+		}
+
+		args = append(args,
 			"-ss", fmt.Sprintf("%.2f", timeOffset),
 			"-i", inputPath,
 			"-vf", vfFilter,
 			"-vframes", "1",
 			"-q:v", "2",
 			outputPath,
-		}
+		)
 	} else {
 		log.InfoContext(ctx, "Generating thumbnail without video info")
 		// 没有视频信息时直接提取一帧
 		args = []string{
 			"-y",
 			"-noautorotate",
+		}
+
+		// 添加线程数限制（如果配置了）
+		if t.cfg.ThreadCount > 0 {
+			args = append(args, "-threads", fmt.Sprintf("%d", t.cfg.ThreadCount))
+		}
+
+		args = append(args,
 			"-ss", fmt.Sprintf("%.2f", timeOffset),
 			"-i", inputPath,
 			"-vframes", "1",
 			"-q:v", "2",
 			outputPath,
-		}
+		)
 	}
 
 	return t.ffmpeg.Run(ctx, args...)

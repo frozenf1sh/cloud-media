@@ -40,6 +40,7 @@ data:
       preset: "superfast"
       gop_size: 48
       thumbnail_size: 1080
+      thread_count: 2
       timeout_multiplier: 3.0
       min_timeout: 10
       max_timeout: 120

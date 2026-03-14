@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - main
-      - feat/*
     tags:
       - 'v*'
-    # 路径过滤：如果只修改了文档或 k8s 配置，不触发构建
     paths-ignore:
       - '**.md'
       - '.gitignore'
@@ -17,14 +15,12 @@ on:
   pull_request:
     branches:
       - main
-    # PR 同样忽略无关文件
     paths-ignore:
       - '**.md'
       - '.gitignore'
       - 'docs/**'
       - 'doc/**'
       - 'k8s/**'
-  # 手动触发
   workflow_dispatch:
     inputs:
       reason:
@@ -37,13 +33,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # test: ...
-
   build-and-push:
     runs-on: ubuntu-latest
-    # 动态判断是否需要 Push (只有在非 PR 情况下才 Push)
-    env:
-      SHOULD_PUSH: ${{ github.event_name != 'pull_request' }}
     permissions:
       contents: read
       packages: write
@@ -56,8 +47,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to the Container registry
-        # 只有需要 Push 的时候才登录，保护凭证
-        if: ${{ env.SHOULD_PUSH == 'true' }}
+        # 移除 if 判断，确保 PR 也能登录以便 push
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -75,18 +65,18 @@ jobs:
             type=sha,prefix=
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=pr
+            type=ref,event=pr 
+            # 上面这行 type=ref,event=pr 就会在 PR 时自动打上类似 `pr-12` 的 Tag
 
       - name: Build and push API Server
         uses: docker/build-push-action@v5
         with:
           context: .
           target: api-server
-          push: ${{ env.SHOULD_PUSH == 'true' }}
-          # 正确使用 metadata-action 生成的动态 tags 和 labels
+          # 直接设为 true，无论是 push 还是 PR 都推送
+          push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
-          # 添加 scope 防止与 worker 互相覆盖缓存
           cache-from: type=gha,scope=api-server
           cache-to: type=gha,mode=max,scope=api-server
 
@@ -108,9 +98,9 @@ jobs:
         with:
           context: .
           target: worker
-          push: ${{ env.SHOULD_PUSH == 'true' }}
+          # 直接设为 true
+          push: true
           tags: ${{ steps.meta-worker.outputs.tags }}
           labels: ${{ steps.meta-worker.outputs.labels }}
-          # 独立的缓存作用域
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
