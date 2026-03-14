@@ -55,7 +55,7 @@ spec:
         tolerationSeconds: 300
       containers:
         - name: api-server
-          image: ghcr.io/frozenf1sh/cloud-media-api-server:latest
+          image: ghcr.io/frozenf1sh/cloud-media-api-server:pr-15
           imagePullPolicy: Always
           ports:
             - name: http

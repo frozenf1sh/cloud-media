@@ -54,7 +54,7 @@ spec:
         tolerationSeconds: 3600
       containers:
         - name: worker
-          image: ghcr.io/frozenf1sh/cloud-media-worker:latest
+          image: ghcr.io/frozenf1sh/cloud-media-worker:pr-15
           imagePullPolicy: Always
           ports:
             - name: http
@@ -101,10 +101,10 @@ spec:
               subPath: prestop.sh
           resources:
             requests:
-              memory: "2Gi"
+              memory: "800Mi"
               cpu: "2000m"
             limits:
-              memory: "3Gi"
+              memory: "800Mi"
               cpu: "2000m"
           lifecycle:
             preStop:

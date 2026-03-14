@@ -6,10 +6,10 @@ metadata:
 spec:
   scaleTargetRef:
     name: worker
-  pollingInterval: 5            # 优化：缩短轮询间隔，让扩容反应更快（默认30s，视频处理建议更敏捷）
+  pollingInterval: 2            # 优化：缩短轮询间隔，让扩容反应更快（默认30s，视频处理建议更敏捷）
   cooldownPeriod: 60            # 优化：缩短 KEDA 自身的冷却时间，依赖 HPA 的稳定窗口控制
   minReplicaCount: 0            # 允许缩容到 0
-  maxReplicaCount: 4            # R9 7940H: 4 Pods × 2核 = 8核满载(短视频/高并发优化)
+  maxReplicaCount: 6            # R9 7940H: 6 Pods × 2核 (超线程利用)
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
@@ -17,7 +17,7 @@ spec:
           stabilizationWindowSeconds: 0 # 激进扩容：有任务立刻起 Pod
           policies:
           - type: Pods
-            value: 5                   # 允许一次性扩容较多 Pod，避免积压
+            value: 6                   # 允许一次性扩容较多 Pod，避免积压
             periodSeconds: 10
         scaleDown:
           stabilizationWindowSeconds: 300 # 缩容稳定窗口：空闲 5 分钟后再开始缩容（防止网络波动导致反复重启）
