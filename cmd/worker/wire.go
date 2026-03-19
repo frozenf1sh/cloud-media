@@ -6,6 +6,7 @@ package main
 import (
 	"time"
 
+	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/storage"
@@ -16,13 +17,13 @@ import (
 )
 
 var workerProviderSet = wire.NewSet(
-	broker.ProviderSet,
 	persistence.ProviderSet,
 	persistence.RepositoryProviderSet,
 	storage.ProviderSet,
 	transcoder.ProviderSet,
 	usecase.ProviderSet,
-	provideRabbitMQURL,
+	provideRabbitMQBroker,
+	wire.Bind(new(domain.ReliableMQBroker), new(*broker.RabbitMQBroker)),
 	provideDatabaseConfig,
 	provideObjectStorageConfig,
 	provideTranscoderConfig,
@@ -34,8 +35,8 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 	return nil, nil
 }
 
-func provideRabbitMQURL(cfg *config.Config) string {
-	return cfg.RabbitMQ.URL
+func provideRabbitMQBroker(cfg *config.Config, msgRepo domain.ProcessedMessageRepository) (*broker.RabbitMQBroker, error) {
+	return broker.NewRabbitMQBroker(cfg.RabbitMQ.URL, msgRepo)
 }
 
 func provideDatabaseConfig(cfg *config.Config) *persistence.Config {

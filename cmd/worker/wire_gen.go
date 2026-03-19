@@ -7,6 +7,7 @@
 package main
 
 import (
+	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/storage"
@@ -20,13 +21,13 @@ import (
 // Injectors from wire.go:
 
 func InitializeWorker(cfg *config.Config) (*Worker, error) {
-	string2 := provideRabbitMQURL(cfg)
-	rabbitMQBroker, err := broker.NewRabbitMQBroker(string2)
+	persistenceConfig := provideDatabaseConfig(cfg)
+	db, err := persistence.NewGormDB(persistenceConfig)
 	if err != nil {
 		return nil, err
 	}
-	persistenceConfig := provideDatabaseConfig(cfg)
-	db, err := persistence.NewGormDB(persistenceConfig)
+	processedMessageRepository := persistence.NewProcessedMessageRepository(db)
+	rabbitMQBroker, err := provideRabbitMQBroker(cfg, processedMessageRepository)
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +50,14 @@ func InitializeWorker(cfg *config.Config) (*Worker, error) {
 
 // wire.go:
 
-var workerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, provideRabbitMQURL,
-	provideDatabaseConfig,
+var workerProviderSet = wire.NewSet(persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, transcoder.ProviderSet, usecase.ProviderSet, provideRabbitMQBroker, wire.Bind(new(domain.ReliableMQBroker), new(*broker.RabbitMQBroker)), provideDatabaseConfig,
 	provideObjectStorageConfig,
 	provideTranscoderConfig,
 	provideOutboxConfig,
 )
 
-func provideRabbitMQURL(cfg *config.Config) string {
-	return cfg.RabbitMQ.URL
+func provideRabbitMQBroker(cfg *config.Config, msgRepo domain.ProcessedMessageRepository) (*broker.RabbitMQBroker, error) {
+	return broker.NewRabbitMQBroker(cfg.RabbitMQ.URL, msgRepo)
 }
 
 func provideDatabaseConfig(cfg *config.Config) *persistence.Config {

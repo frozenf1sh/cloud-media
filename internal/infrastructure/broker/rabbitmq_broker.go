@@ -12,17 +12,10 @@ import (
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
 	"github.com/google/uuid"
-	"github.com/google/wire"
 	"go.opentelemetry.io/otel/trace"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// ProviderSet 是 Wire 的提供者集合
-var ProviderSet = wire.NewSet(
-	NewRabbitMQBroker,
-	wire.Bind(new(domain.MQBroker), new(*RabbitMQBroker)),
-	wire.Bind(new(domain.ReliableMQBroker), new(*RabbitMQBroker)),
-)
 
 // TaskHandler 任务处理函数类型
 type TaskHandler func(ctx context.Context, task *domain.VideoTask) error
