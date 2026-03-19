@@ -1,10 +1,3 @@
-// Package ffmpeg 提供 FFmpeg 和 FFprobe 的 Go 封装，用于视频处理和信息提取。
-//
-// 主要功能：
-//   - 视频信息解析（使用 FFprobe）
-//   - 视频文件验证
-//   - 视频转码进度解析
-//   - 视频缩放计算
 package ffmpeg
 
 import (
