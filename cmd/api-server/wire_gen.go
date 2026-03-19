@@ -8,6 +8,7 @@ package main
 
 import (
 	"github.com/frozenf1sh/cloud-media/internal/adapter/rpc"
+	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/broker"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/persistence"
 	"github.com/frozenf1sh/cloud-media/internal/infrastructure/storage"
@@ -28,8 +29,7 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 	outboxRepository := persistence.NewOutboxRepository(db)
 	videoTaskRepository := persistence.NewVideoTaskRepository(db)
 	processedMessageRepository := persistence.NewProcessedMessageRepository(db)
-	string2 := provideRabbitMQURL(cfg)
-	rabbitMQBroker, err := broker.NewRabbitMQBroker(string2)
+	rabbitMQBroker, err := provideRabbitMQBroker(cfg, processedMessageRepository)
 	if err != nil {
 		return nil, err
 	}
@@ -49,14 +49,13 @@ func InitializeVideoServer(cfg *config.Config) (*Server, error) {
 
 // wire.go:
 
-var handlerProviderSet = wire.NewSet(broker.ProviderSet, persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, usecase.ProviderSet, rpc.ProviderSet, provideRabbitMQURL,
-	provideDatabaseConfig,
+var handlerProviderSet = wire.NewSet(persistence.ProviderSet, persistence.RepositoryProviderSet, storage.ProviderSet, usecase.ProviderSet, rpc.ProviderSet, provideRabbitMQBroker, wire.Bind(new(domain.ReliableMQBroker), new(*broker.RabbitMQBroker)), provideDatabaseConfig,
 	provideObjectStorageConfig,
 	provideOutboxConfig,
 )
 
-func provideRabbitMQURL(cfg *config.Config) string {
-	return cfg.RabbitMQ.URL
+func provideRabbitMQBroker(cfg *config.Config, msgRepo domain.ProcessedMessageRepository) (*broker.RabbitMQBroker, error) {
+	return broker.NewRabbitMQBroker(cfg.RabbitMQ.URL, msgRepo)
 }
 
 func provideDatabaseConfig(cfg *config.Config) *persistence.Config {
