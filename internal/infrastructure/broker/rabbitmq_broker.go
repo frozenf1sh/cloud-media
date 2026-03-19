@@ -30,7 +30,6 @@ type TaskHandler func(ctx context.Context, task *domain.VideoTask) error
 const (
 	defaultConsumerID     = "cloud-media-worker"
 	publishConfirmTimeout = 60 * time.Second
-	defaultMaxRetries     = 10
 )
 
 // RabbitMQBroker 支持发布确认的 RabbitMQ broker
@@ -47,15 +46,11 @@ type RabbitMQBroker struct {
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	running         bool
+	msgRepo         domain.ProcessedMessageRepository
 }
 
 // NewRabbitMQBroker 创建 RabbitMQBroker 实例
-func NewRabbitMQBroker(url string) (*RabbitMQBroker, error) {
-	return NewRabbitMQBrokerWithConsumerID(url, defaultConsumerID)
-}
-
-// NewRabbitMQBrokerWithConsumerID 创建带消费者 ID 的 RabbitMQBroker 实例
-func NewRabbitMQBrokerWithConsumerID(url, consumerID string) (*RabbitMQBroker, error) {
+func NewRabbitMQBroker(url string, msgRepo domain.ProcessedMessageRepository) (*RabbitMQBroker, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
@@ -100,11 +95,12 @@ func NewRabbitMQBrokerWithConsumerID(url, consumerID string) (*RabbitMQBroker, e
 		channel:         ch,
 		queue:           q,
 		url:             url,
-		consumerID:      consumerID,
+		consumerID:      defaultConsumerID,
 		pendingConfirms: make(map[uint64]chan amqp.Confirmation),
 		returns:         make(chan amqp.Return, 10),
 		ctx:             ctx,
 		cancel:          cancel,
+		msgRepo:         msgRepo,
 	}, nil
 }
 
@@ -417,6 +413,20 @@ func (r *RabbitMQBroker) handleMessage(ctx context.Context, msg amqp.Delivery, h
 	logger.InfoContext(ctx, "Received task",
 		logger.String("task_id", task.TaskID),
 		logger.String("message_id", messageID))
+
+	// 幂等检查：如果消息已处理过，直接跳过
+	if r.msgRepo != nil {
+		processed, err := r.msgRepo.TryMarkAsProcessed(ctx, messageID, r.consumerID)
+		if err != nil {
+			logger.WarnContext(ctx, "Failed to check processed message", logger.Err(err))
+			// 检查失败不阻塞处理，继续执行
+		} else if !processed {
+			logger.InfoContext(ctx, "Message already processed, skipping",
+				logger.String("message_id", messageID))
+			_ = msg.Ack(false)
+			return nil
+		}
+	}
 
 	if err := handler(ctx, &task); err != nil {
 		telemetry.RecordError(ctx, err)
