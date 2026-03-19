@@ -41,6 +41,11 @@
 *   **自动恢复机制**：定时扫描 pending 事件、stuck 任务，自动清理旧去重记录。
 *   **消息持久化**：消息 DeliveryMode=Persistent + 队列 durable，MQ 重启不丢消息。
 
+### 📦 模块化 FFmpeg 工具包
+*   **清晰的职责分离**：cmd/rotation/hls/video_info/scale/progress/validate 各司其职。
+*   **可复用工具函数**：旋转滤镜、尺寸计算、播放列表生成等公共逻辑独立封装。
+*   **精简转码器**：ffmpeg_transcoder 使用工具函数，代码更易维护。
+
 ### 🏗️ 云原生架构
 *   **Worker Pool + Queue 模式**：基于 RabbitMQ + KEDA 构建弹性 Worker 池，每个 Pod 单任务处理，支持 Scale-to-Zero。
 *   **异步削峰**：基于 RabbitMQ 构建高可靠任务队列，实现 API 层与计算层的彻底解耦。
