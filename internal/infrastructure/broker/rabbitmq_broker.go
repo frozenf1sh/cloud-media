@@ -11,7 +11,6 @@ import (
 	"github.com/frozenf1sh/cloud-media/internal/domain"
 	"github.com/frozenf1sh/cloud-media/pkg/logger"
 	"github.com/frozenf1sh/cloud-media/pkg/telemetry"
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -188,74 +187,6 @@ func (r *RabbitMQBroker) Stop() error {
 	}
 
 	logger.Info("RabbitMQ broker stopped")
-	return nil
-}
-
-// PublishVideoTask 发布视频任务
-func (r *RabbitMQBroker) PublishVideoTask(ctx context.Context, task *domain.VideoTask) error {
-	body, err := json.Marshal(task)
-	if err != nil {
-		return fmt.Errorf("failed to marshal task: %w", err)
-	}
-
-	headers := make(amqp.Table)
-	carrier := make(map[string]string)
-	telemetry.InjectToCarrier(ctx, carrier)
-
-	for k, v := range carrier {
-		headers[k] = v
-	}
-
-	messageID := uuid.New().String()
-	headers["message_id"] = messageID
-
-	r.publishMutex.Lock()
-	deliveryTag := r.channel.GetNextPublishSeqNo()
-	confirmChan := make(chan amqp.Confirmation, 1)
-	r.pendingConfirms[deliveryTag] = confirmChan
-
-	err = r.channel.Publish(
-		"",
-		r.queue.Name,
-		true,
-		false,
-		amqp.Publishing{
-			ContentType:  "application/json",
-			DeliveryMode: amqp.Persistent,
-			MessageId:    messageID,
-			Body:         body,
-			Headers:      headers,
-		},
-	)
-	if err != nil {
-		delete(r.pendingConfirms, deliveryTag)
-		r.publishMutex.Unlock()
-		return fmt.Errorf("failed to publish message: %w", err)
-	}
-	r.publishMutex.Unlock()
-
-	confirmCtx, cancel := context.WithTimeout(ctx, publishConfirmTimeout)
-	defer cancel()
-
-	select {
-	case confirm := <-confirmChan:
-		if !confirm.Ack {
-			return fmt.Errorf("message nacked by broker")
-		}
-	case <-confirmCtx.Done():
-		r.publishMutex.Lock()
-		delete(r.pendingConfirms, deliveryTag)
-		r.publishMutex.Unlock()
-		return fmt.Errorf("publish confirm timeout: %w", confirmCtx.Err())
-	}
-
-	logger.InfoContext(ctx, "Published task (with confirm)",
-		logger.String("task_id", task.TaskID),
-		logger.String("trace_id", task.TraceID),
-		logger.String("source_key", task.SourceKey),
-		logger.String("message_id", messageID),
-		logger.Uint64("delivery_tag", deliveryTag))
-
 	return nil
 }
 

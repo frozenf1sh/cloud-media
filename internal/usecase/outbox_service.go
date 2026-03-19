@@ -74,23 +74,6 @@ func NewOutboxService(
 	}
 }
 
-// SetRecoveryInterval 设置恢复扫描间隔
-func (s *OutboxService) SetRecoveryInterval(interval time.Duration) {
-	s.recoveryInterval = interval
-}
-
-// SetPendingTaskMaxAge 设置待处理任务最大存活时间
-func (s *OutboxService) SetPendingTaskMaxAge(age time.Duration) {
-	s.pendingTaskMaxAge = age
-}
-
-// SetBatchSize 设置批量处理大小
-func (s *OutboxService) SetBatchSize(size int) {
-	if size > 0 {
-		s.batchSize = size
-	}
-}
-
 // Start 启动 Outbox 服务
 func (s *OutboxService) Start(ctx context.Context) error {
 	// 启动 broker
