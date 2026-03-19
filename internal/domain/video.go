@@ -169,14 +169,8 @@ type ProcessedMessageRepository interface {
 	CleanupOldEntries(ctx context.Context, olderThan time.Duration) error
 }
 
-// MQBroker 消息队列接口
-type MQBroker interface {
-	PublishVideoTask(ctx context.Context, task *VideoTask) error
-}
-
 // ReliableMQBroker 可靠消息队列接口（支持发布确认）
 type ReliableMQBroker interface {
-	MQBroker
 	// PublishWithConfirm 带确认的发布
 	PublishWithConfirm(ctx context.Context, event *OutboxEvent) error
 	// Start 启动连接和确认监听
