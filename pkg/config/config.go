@@ -1,11 +1,21 @@
+// Package config 提供应用配置管理，支持 YAML 文件和环境变量。
+//
+// 配置优先级（从高到低）：
+//  1. 环境变量（前缀 CLOUD_MEDIA_）
+//  2. YAML 配置文件
+//  3. 默认值
+//
+// 环境变量示例：
+//
+//	CLOUD_MEDIA_DATABASE_HOST=localhost
+//	CLOUD_MEDIA_SERVER_PORT=8080
 package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -53,9 +63,9 @@ type ObjectStorageConfig struct {
 
 	// Endpoint 配置
 	InternalEndpoint string `mapstructure:"internal_endpoint"`
-	InternalUseSSL  bool   `mapstructure:"internal_use_ssl"`
+	InternalUseSSL   bool   `mapstructure:"internal_use_ssl"`
 	ExternalEndpoint string `mapstructure:"external_endpoint"`
-	ExternalUseSSL  bool   `mapstructure:"external_use_ssl"`
+	ExternalUseSSL   bool   `mapstructure:"external_use_ssl"`
 
 	// 认证配置
 	AccessKeyID     string `mapstructure:"access_key_id"`
@@ -155,30 +165,32 @@ type ObservabilityConfig struct {
 // MetricsConfig Metrics 配置
 type MetricsConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
-	Path         string `mapstructure:"path"`         // 保留用于向后兼容
-	Port         int    `mapstructure:"port"`         // 保留用于向后兼容
-	Exporter     string `mapstructure:"exporter"`     // otlp, stdout, none
+	Path         string `mapstructure:"path"`          // 保留用于向后兼容
+	Port         int    `mapstructure:"port"`          // 保留用于向后兼容
+	Exporter     string `mapstructure:"exporter"`      // otlp, stdout, none
 	OTLPEndpoint string `mapstructure:"otlp_endpoint"` // OTLP 接收端地址
 }
 
 // TracingConfig OpenTelemetry 追踪配置
 type TracingConfig struct {
-	Enabled     bool    `mapstructure:"enabled"`
-	Exporter    string  `mapstructure:"exporter"`     // otlp, stdout, none
+	Enabled      bool    `mapstructure:"enabled"`
+	Exporter     string  `mapstructure:"exporter"`      // otlp, stdout, none
 	OTLPEndpoint string  `mapstructure:"otlp_endpoint"` // OTLP 接收端地址
-	Sampler     string  `mapstructure:"sampler"`      // always_on, always_off, traceidratio
+	Sampler      string  `mapstructure:"sampler"`       // always_on, always_off, traceidratio
 	SamplerRatio float64 `mapstructure:"sampler_ratio"`
 }
 
-// Load 从文件加载配置
+// Load 从文件加载配置，同时支持环境变量覆盖
 func Load(filePath string) (*Config, error) {
 	v := viper.New()
 
 	// 设置默认值
 	setDefaults(v)
 
-	// 显式绑定所有环境变量（确保环境变量能正确映射）
-	bindEnvVars(v)
+	// 配置环境变量
+	v.SetEnvPrefix("CLOUD_MEDIA")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
 	// 配置文件设置
 	if filePath != "" {
@@ -194,233 +206,27 @@ func Load(filePath string) (*Config, error) {
 		v.AddConfigPath("/etc/cloud-media")
 	}
 
-	// 先读取配置文件
+	// 读取配置文件（可选，如果不存在也不报错）
 	if err := v.ReadInConfig(); err != nil {
 		slog.Warn("Failed to read config file, using defaults + env vars", "error", err)
 	} else {
 		slog.Info("Config file loaded successfully", "path", v.ConfigFileUsed())
 	}
 
-	// 配置环境变量
-	v.SetEnvPrefix("CLOUD_MEDIA")
-	v.AutomaticEnv()
-
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// 手动用环境变量覆盖（确保环境变量优先级最高）
-	overrideFromEnv(&cfg)
-
 	return &cfg, nil
-}
-
-// overrideFromEnv 手动从环境变量覆盖配置（优先级最高）
-func overrideFromEnv(cfg *Config) {
-	// 辅助函数：获取环境变量，如果存在则覆盖
-	getEnv := func(key string) string {
-		return os.Getenv("CLOUD_MEDIA_" + key)
-	}
-
-	// Database
-	if val := getEnv("DATABASE_USER"); val != "" {
-		cfg.Database.User = val
-	}
-	if val := getEnv("DATABASE_PASSWORD"); val != "" {
-		cfg.Database.Password = val
-	}
-	if val := getEnv("DATABASE_HOST"); val != "" {
-		cfg.Database.Host = val
-	}
-	if val := getEnv("DATABASE_PORT"); val != "" {
-		if port, err := strconv.Atoi(val); err == nil {
-			cfg.Database.Port = port
-		}
-	}
-	if val := getEnv("DATABASE_DBNAME"); val != "" {
-		cfg.Database.DBName = val
-	}
-	if val := getEnv("DATABASE_SSLMODE"); val != "" {
-		cfg.Database.SSLMode = val
-	}
-
-	// RabbitMQ
-	if val := getEnv("RABBITMQ_URL"); val != "" {
-		cfg.RabbitMQ.URL = val
-	}
-
-	// Object Storage
-	if val := getEnv("OBJECT_STORAGE_TYPE"); val != "" {
-		cfg.ObjectStorage.Type = ObjectStorageType(val)
-	}
-	if val := getEnv("OBJECT_STORAGE_INTERNAL_ENDPOINT"); val != "" {
-		cfg.ObjectStorage.InternalEndpoint = val
-	}
-	if val := getEnv("OBJECT_STORAGE_INTERNAL_USE_SSL"); val != "" {
-		if b, err := strconv.ParseBool(val); err == nil {
-			cfg.ObjectStorage.InternalUseSSL = b
-		}
-	}
-	if val := getEnv("OBJECT_STORAGE_EXTERNAL_ENDPOINT"); val != "" {
-		cfg.ObjectStorage.ExternalEndpoint = val
-	}
-	if val := getEnv("OBJECT_STORAGE_EXTERNAL_USE_SSL"); val != "" {
-		if b, err := strconv.ParseBool(val); err == nil {
-			cfg.ObjectStorage.ExternalUseSSL = b
-		}
-	}
-	if val := getEnv("OBJECT_STORAGE_ACCESS_KEY_ID"); val != "" {
-		cfg.ObjectStorage.AccessKeyID = val
-	}
-	if val := getEnv("OBJECT_STORAGE_SECRET_ACCESS_KEY"); val != "" {
-		cfg.ObjectStorage.SecretAccessKey = val
-	}
-	if val := getEnv("OBJECT_STORAGE_REGION"); val != "" {
-		cfg.ObjectStorage.Region = val
-	}
-	if val := getEnv("OBJECT_STORAGE_CDN_ENABLED"); val != "" {
-		if b, err := strconv.ParseBool(val); err == nil {
-			cfg.ObjectStorage.CDN.Enabled = b
-		}
-	}
-	if val := getEnv("OBJECT_STORAGE_CDN_BASE_URL"); val != "" {
-		cfg.ObjectStorage.CDN.BaseURL = val
-	}
-
-	// Observability
-	if val := getEnv("OBSERVABILITY_SERVICE_NAME"); val != "" {
-		cfg.Observability.ServiceName = val
-	}
-	if val := getEnv("OBSERVABILITY_SERVICE_VERSION"); val != "" {
-		cfg.Observability.ServiceVersion = val
-	}
-
-	// Observability - Metrics
-	if val := getEnv("OBSERVABILITY_METRICS_ENABLED"); val != "" {
-		if b, err := strconv.ParseBool(val); err == nil {
-			cfg.Observability.Metrics.Enabled = b
-		}
-	}
-	if val := getEnv("OBSERVABILITY_METRICS_EXPORTER"); val != "" {
-		cfg.Observability.Metrics.Exporter = val
-	}
-	if val := getEnv("OBSERVABILITY_METRICS_OTLP_ENDPOINT"); val != "" {
-		cfg.Observability.Metrics.OTLPEndpoint = val
-	}
-
-	// Observability - Tracing
-	if val := getEnv("OBSERVABILITY_TRACING_ENABLED"); val != "" {
-		if b, err := strconv.ParseBool(val); err == nil {
-			cfg.Observability.Tracing.Enabled = b
-		}
-	}
-	if val := getEnv("OBSERVABILITY_TRACING_EXPORTER"); val != "" {
-		cfg.Observability.Tracing.Exporter = val
-	}
-	if val := getEnv("OBSERVABILITY_TRACING_OTLP_ENDPOINT"); val != "" {
-		cfg.Observability.Tracing.OTLPEndpoint = val
-	}
-	if val := getEnv("OBSERVABILITY_TRACING_SAMPLER"); val != "" {
-		cfg.Observability.Tracing.Sampler = val
-	}
-	if val := getEnv("OBSERVABILITY_TRACING_SAMPLER_RATIO"); val != "" {
-		if f, err := strconv.ParseFloat(val, 64); err == nil {
-			cfg.Observability.Tracing.SamplerRatio = f
-		}
-	}
-
-	// Outbox
-	if val := getEnv("OUTBOX_RECOVERY_INTERVAL"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			cfg.Outbox.RecoveryInterval = i
-		}
-	}
-	if val := getEnv("OUTBOX_PENDING_TASK_MAX_AGE"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			cfg.Outbox.PendingTaskMaxAge = i
-		}
-	}
-	if val := getEnv("OUTBOX_BATCH_SIZE"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			cfg.Outbox.BatchSize = i
-		}
-	}
-	if val := getEnv("OUTBOX_MAX_RETRIES"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			cfg.Outbox.MaxRetries = i
-		}
-	}
-
-	// Transcoder
-	if val := getEnv("TRANSCODER_THREAD_COUNT"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			cfg.Transcoder.ThreadCount = i
-		}
-	}
-}
-
-// bindEnvVars 显式绑定所有环境变量，确保环境变量优先级最高
-func bindEnvVars(v *viper.Viper) {
-	// Database
-	_ = v.BindEnv("database.user")
-	_ = v.BindEnv("database.password")
-	_ = v.BindEnv("database.host")
-	_ = v.BindEnv("database.port")
-	_ = v.BindEnv("database.dbname")
-	_ = v.BindEnv("database.sslmode")
-
-	// RabbitMQ
-	_ = v.BindEnv("rabbitmq.url")
-
-	// Object Storage
-	_ = v.BindEnv("object_storage.type")
-	_ = v.BindEnv("object_storage.internal_endpoint")
-	_ = v.BindEnv("object_storage.internal_use_ssl")
-	_ = v.BindEnv("object_storage.external_endpoint")
-	_ = v.BindEnv("object_storage.external_use_ssl")
-	_ = v.BindEnv("object_storage.access_key_id")
-	_ = v.BindEnv("object_storage.secret_access_key")
-	_ = v.BindEnv("object_storage.region")
-	_ = v.BindEnv("object_storage.cdn.enabled")
-	_ = v.BindEnv("object_storage.cdn.base_url")
-
-	// Server
-	_ = v.BindEnv("server.host")
-	_ = v.BindEnv("server.port")
-
-	// Log
-	_ = v.BindEnv("log.level")
-	_ = v.BindEnv("log.format")
-
-	// Observability
-	_ = v.BindEnv("observability.service_name")
-	_ = v.BindEnv("observability.service_version")
-	_ = v.BindEnv("observability.metrics.enabled")
-	_ = v.BindEnv("observability.metrics.exporter")
-	_ = v.BindEnv("observability.metrics.otlp_endpoint")
-	_ = v.BindEnv("observability.tracing.enabled")
-	_ = v.BindEnv("observability.tracing.exporter")
-	_ = v.BindEnv("observability.tracing.otlp_endpoint")
-	_ = v.BindEnv("observability.tracing.sampler")
-	_ = v.BindEnv("observability.tracing.sampler_ratio")
-
-	// Transcoder
-	_ = v.BindEnv("transcoder.thread_count")
-
-	// Outbox
-	_ = v.BindEnv("outbox.recovery_interval")
-	_ = v.BindEnv("outbox.pending_task_max_age")
-	_ = v.BindEnv("outbox.batch_size")
-	_ = v.BindEnv("outbox.max_retries")
 }
 
 // LoadFromEnv 仅从环境变量加载配置
 func LoadFromEnv() (*Config, error) {
 	v := viper.New()
 	setDefaults(v)
-	v.AutomaticEnv()
 	v.SetEnvPrefix("CLOUD_MEDIA")
+	v.AutomaticEnv()
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -439,6 +245,7 @@ func Default() *Config {
 	return &cfg
 }
 
+// setDefaults 设置所有配置项的默认值
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 8080)
@@ -536,6 +343,7 @@ func (c *Config) Dump() string {
 	return string(data)
 }
 
+// maskString 部分隐藏敏感字符串
 func maskString(s string) string {
 	if len(s) <= 4 {
 		return "***"
