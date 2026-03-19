@@ -1,3 +1,10 @@
+// Package persistence 实现领域仓储接口，使用 GORM 访问 PostgreSQL。
+//
+// 包含：
+//   - Database - 数据库连接和迁移
+//   - VideoTaskRepository - 视频任务仓储实现
+//   - OutboxRepository - Outbox 事件仓储实现
+//   - ProcessedMessageRepository - 已处理消息仓储实现
 package persistence
 
 import (

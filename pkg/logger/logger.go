@@ -1,4 +1,6 @@
-
+// Package logger 提供结构化日志功能，集成 OpenTelemetry trace_id。
+//
+// 基于标准库 slog，支持 JSON 和文本格式
 package logger
 
 import (

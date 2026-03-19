@@ -1,3 +1,9 @@
+// Package usecase 实现业务用例，协调领域对象完成业务逻辑。
+//
+// 包含：
+//   - VideoUseCase - 视频任务提交、查询等 API 用例
+//   - WorkerUseCase - Worker 转码任务处理用例
+//   - OutboxService - Transactional Outbox 模式实现
 package usecase
 
 import (

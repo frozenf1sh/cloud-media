@@ -1,3 +1,6 @@
+// Package health 提供健康检查功能，支持 Kubernetes liveness/readiness 探针。
+//
+// 实现 RFC draft-inadarei-api-health-check-06 规范
 package health
 
 import (

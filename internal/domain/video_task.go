@@ -1,3 +1,9 @@
+// Package domain 定义领域模型和核心业务接口。
+//
+// 包含：
+//   - VideoTask - 视频转码任务模型
+//   - OutputInfo - HLS 输出信息
+//   - TranscodeConfig - 转码配置
 package domain
 
 // VideoTaskStatus 任务状态类型
