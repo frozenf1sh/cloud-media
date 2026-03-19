@@ -1,3 +1,8 @@
+// Package storage 实现对象存储接口，支持 MinIO、AWS S3、Cloudflare R2。
+//
+// 特性：
+//   - 双 Endpoint 模式：内网传输 + 外网预签名 URL
+//   - 预签名 URL 支持上传和下载
 package storage
 
 import (

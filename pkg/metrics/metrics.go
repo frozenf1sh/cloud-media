@@ -1,4 +1,7 @@
-
+// Package metrics 提供 OpenTelemetry metrics 功能，支持 OTLP 导出。
+//
+// 包含：
+//   - 任务计数、转码字节数等业务指标
 package metrics
 
 import (

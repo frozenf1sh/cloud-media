@@ -1,3 +1,7 @@
+// Package interceptor 提供 HTTP 中间件，实现全链路追踪。
+//
+// 包含：
+//   - TracingInterceptor - 自动创建和传播 trace 上下文
 package interceptor
 
 import (

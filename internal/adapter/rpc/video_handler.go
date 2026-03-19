@@ -1,3 +1,7 @@
+// Package rpc 实现 Connect RPC 适配器，将外部请求转换为内部用例调用。
+//
+// 包含：
+//   - VideoServer - 视频服务 RPC 处理器
 package rpc
 
 import (

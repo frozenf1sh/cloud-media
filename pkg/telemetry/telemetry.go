@@ -1,3 +1,9 @@
+// Package telemetry 提供 OpenTelemetry 分布式追踪功能。
+//
+// 包含：
+//   - Span 创建和管理
+//   - Trace 上下文传播（W3C Trace Context）
+//   - 健康检查请求采样过滤
 package telemetry
 
 import (

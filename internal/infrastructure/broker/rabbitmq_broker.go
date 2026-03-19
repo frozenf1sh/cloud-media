@@ -1,4 +1,7 @@
-
+// Package broker 实现可靠消息队列，使用 RabbitMQ 的发布确认机制。
+//
+// 包含：
+//   - RabbitMQBroker - 支持发布确认和幂等消费的消息队列实现
 package broker
 
 import (

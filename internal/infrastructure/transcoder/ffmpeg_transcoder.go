@@ -1,3 +1,10 @@
+// Package transcoder 实现视频转码器，使用 FFmpeg 进行 HLS 切片。
+//
+// 特性：
+//   - 多码率变体输出（1080p、720p、480p）
+//   - 单进程多路输出优化
+//   - 自动封面生成
+//   - 竖屏视频支持
 package transcoder
 
 import (

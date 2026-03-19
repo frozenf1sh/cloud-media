@@ -1,3 +1,8 @@
+// Package errors 提供应用错误定义和错误处理工具。
+//
+// 包含：
+//   - 标准错误码定义
+//   - 错误包装和 unwrap 支持
 package errors
 
 import (
