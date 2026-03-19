@@ -50,3 +50,6 @@ secrets.unsealed.yaml
 k8s/**/secrets.unsealed.yaml
 sealed-secrets-private-key.yaml
 sealed-secrets-private-key.backup.yaml
+
+# Todo directory - local plans not tracked
+todo/

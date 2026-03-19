@@ -27,6 +27,34 @@ type Config struct {
 	SSLMode  string
 }
 
+// Database 数据库封装
+type Database struct {
+	DB *gorm.DB
+}
+
+// NewDatabase 创建数据库实例
+func NewDatabase(db *gorm.DB) *Database {
+	return &Database{DB: db}
+}
+
+// AutoMigrate 自动迁移表结构
+func (d *Database) AutoMigrate() error {
+	// 先创建复合唯一索引
+	if err := d.DB.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_messages_msg_consumer
+		ON processed_messages(message_id, consumer_id)
+	`).Error; err != nil {
+		// 索引可能已存在，忽略错误
+	}
+
+	return d.DB.AutoMigrate(
+		&VideoTaskModel{},
+		&TaskStatusLogModel{},
+		&OutboxEventModel{},
+		&ProcessedMessageModel{},
+	)
+}
+
 // NewGormDB 创建 GORM 数据库连接
 func NewGormDB(cfg *Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
