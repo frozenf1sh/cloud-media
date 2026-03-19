@@ -12,7 +12,7 @@ type FFmpeg struct {
 	path string
 }
 
-// NewFFmpeg 创建 FFmpeg 实例
+// NewFFmpeg 创建 FFmpeg 实例，自动查找系统中的 ffmpeg 可执行文件
 func NewFFmpeg() (*FFmpeg, error) {
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -26,7 +26,7 @@ func (f *FFmpeg) Path() string {
 	return f.path
 }
 
-// Command 创建 FFmpeg 命令
+// Command 创建 FFmpeg 命令，返回 *exec.Cmd
 func (f *FFmpeg) Command(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, f.path, args...)
 }
