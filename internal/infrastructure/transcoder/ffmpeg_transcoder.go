@@ -108,7 +108,7 @@ func (t *FFmpegTranscoder) Transcode(
 	}
 
 	// 判断是否是竖屏视频（考虑 rotation）
-	effectiveWidth, effectiveHeight := getEffectiveDimensions(videoInfo.Width, videoInfo.Height, videoInfo.Rotation)
+	effectiveWidth, effectiveHeight := ffmpeg.GetEffectiveDimensions(videoInfo.Width, videoInfo.Height, videoInfo.Rotation)
 	isPortrait := effectiveHeight > effectiveWidth
 
 	log.InfoContext(ctx, "Effective video dimensions",
@@ -291,7 +291,7 @@ func (t *FFmpegTranscoder) transcodeAllVariants(
 	}
 
 	// 记录完整的 FFmpeg 命令用于调试
-	cmdStr := formatFFmpegCommand(args)
+	cmdStr := ffmpeg.FormatCommand(args)
 	log.InfoContext(ctx, "FFmpeg multi-output command",
 		logger.String("command", cmdStr),
 	)
@@ -326,25 +326,6 @@ func (t *FFmpegTranscoder) transcodeAllVariants(
 	return nil
 }
 
-// formatFFmpegCommand 格式化 FFmpeg 命令用于日志输出
-func formatFFmpegCommand(args []string) string {
-	var sb strings.Builder
-	for i, arg := range args {
-		if i > 0 {
-			sb.WriteString(" ")
-		}
-		// 包含空格的参数需要引号
-		if strings.ContainsAny(arg, " \\\"'") {
-			sb.WriteString("'")
-			sb.WriteString(strings.ReplaceAll(arg, "'", "\\'"))
-			sb.WriteString("'")
-		} else {
-			sb.WriteString(arg)
-		}
-	}
-	return sb.String()
-}
-
 // buildFiltergraph 构建复杂滤镜图
 // 返回: filtergraph 字符串、各变体的输出标签名
 func (t *FFmpegTranscoder) buildFiltergraph(
@@ -363,19 +344,10 @@ func (t *FFmpegTranscoder) buildFiltergraph(
 
 	// 添加旋转滤镜（如需要）
 	// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
-	switch videoInfo.Rotation {
-	case 90, -270:
-		// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
-		parts = append(parts, fmt.Sprintf("[%s]transpose=2[rotated]", currentInputLabel))
-		currentInputLabel = "rotated"
-	case 180, -180:
-		// 旋转180度
-		parts = append(parts, fmt.Sprintf("[%s]transpose=1,transpose=1[rotated]", currentInputLabel))
-		currentInputLabel = "rotated"
-	case 270, -90:
-		// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
-		parts = append(parts, fmt.Sprintf("[%s]transpose=1[rotated]", currentInputLabel))
-		currentInputLabel = "rotated"
+	rotationFilter, newLabel := ffmpeg.ApplyRotationToLabel(currentInputLabel, videoInfo.Rotation)
+	if rotationFilter != "" {
+		parts = append(parts, rotationFilter)
+		currentInputLabel = newLabel
 	}
 
 	// 添加 split 滤镜
@@ -420,30 +392,19 @@ func (t *FFmpegTranscoder) buildOutputArgs(
 	}
 }
 
-// getEffectiveDimensions 获取考虑 rotation 后的有效宽高
-func getEffectiveDimensions(width, height, rotation int) (int, int) {
-	if rotation == 90 || rotation == 270 || rotation == -90 || rotation == -270 {
-		return height, width
-	}
-	return width, height
-}
-
 // generateMasterPlaylist 生成 HLS 主播放列表
 func (t *FFmpegTranscoder) generateMasterPlaylist(path string, variants []domain.VariantOutput, videoInfo *domain.VideoInfo) error {
-	var sb strings.Builder
-
-	sb.WriteString("#EXTM3U\n")
-	sb.WriteString("#EXT-X-VERSION:3\n")
-
+	hlsVariants := make([]ffmpeg.VariantConfig, len(variants))
 	for i, variant := range variants {
-		// 计算该变体的实际分辨率（考虑 rotation）
 		width, height := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, t.cfg.Variants[i].TargetSize, videoInfo.Rotation)
-		sb.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n",
-			variant.Bandwidth, width, height))
-		sb.WriteString(fmt.Sprintf("%s/index.m3u8\n", t.cfg.Variants[i].Name))
+		hlsVariants[i] = ffmpeg.VariantConfig{
+			Name:      t.cfg.Variants[i].Name,
+			Width:     width,
+			Height:    height,
+			Bandwidth: variant.Bandwidth,
+		}
 	}
-
-	return os.WriteFile(path, []byte(sb.String()), 064)
+	return ffmpeg.WriteMasterPlaylist(path, hlsVariants)
 }
 
 // GetVideoInfo 获取并验证视频信息
@@ -486,18 +447,10 @@ func (t *FFmpegTranscoder) GenerateThumbnail(ctx context.Context, inputPath stri
 		thumbWidth, thumbHeight := t.scaleCalculator.CalculateWithRotation(videoInfo.Width, videoInfo.Height, t.cfg.ThumbnailSize, videoInfo.Rotation)
 
 		// 构建视频滤镜链：先旋转（如果需要），再缩放
-		// 注意：FFmpeg 的 transpose 滤镜方向与 rotation metadata 相反
 		var filters []string
-		switch videoInfo.Rotation {
-		case 90, -270:
-			// rotation=90 表示视频本身逆时针转了90度，需要顺时针转回来
-			filters = append(filters, "transpose=2")
-		case 180, -180:
-			// 旋转180度
-			filters = append(filters, "transpose=1,transpose=1")
-		case 270, -90:
-			// rotation=270 表示视频本身顺时针转了270度（等于逆时针90度），需要逆时针转回来
-			filters = append(filters, "transpose=1")
+		rotationFilter := ffmpeg.BuildRotationFilter(videoInfo.Rotation)
+		if rotationFilter != "" {
+			filters = append(filters, rotationFilter)
 		}
 		filters = append(filters, fmt.Sprintf("scale=%d:%d:flags=lanczos,setsar=1:1", thumbWidth, thumbHeight))
 		vfFilter := strings.Join(filters, ",")
