@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// ValidationConfig 验证配置
+// ValidationConfig 视频验证配置
 type ValidationConfig struct {
 	MinFileSize    int64   // 最小文件大小（字节），默认 100 字节
 	MaxFileSize    int64   // 最大文件大小（字节），默认 10GB
@@ -16,13 +16,7 @@ type ValidationConfig struct {
 	MaxAspectRatio float64 // 最大宽高比，默认 16/1
 }
 
-// ValidationResult 验证结果，包含验证通过的视频信息
-type ValidationResult struct {
-	Valid     bool
-	VideoInfo *VideoInfo // 验证通过时返回视频信息
-}
-
-// DefaultValidationConfig 默认验证配置
+// DefaultValidationConfig 返回默认验证配置
 func DefaultValidationConfig() ValidationConfig {
 	return ValidationConfig{
 		MinFileSize:    100,
@@ -34,7 +28,7 @@ func DefaultValidationConfig() ValidationConfig {
 	}
 }
 
-// VideoValidator 视频文件验证器
+// VideoValidator 视频文件验证器，验证文件是否为有效的视频文件
 type VideoValidator struct {
 	config     ValidationConfig
 	ffprobe    *FFprobe
@@ -60,6 +54,12 @@ func NewDefaultVideoValidator() (*VideoValidator, error) {
 }
 
 // ValidateAndGetInfo 验证视频文件并返回视频信息（避免重复 FFprobe 调用）
+// 验证步骤：
+//  1. 检查文件是否存在
+//  2. 检查文件大小
+//  3. 使用 FFprobe 解析视频流
+//  4. 验证视频时长
+//  5. 验证宽高比
 func (v *VideoValidator) ValidateAndGetInfo(ctx context.Context, filePath string) (*VideoInfo, error) {
 	// 1. 检查文件是否存在并获取信息
 	info, err := os.Stat(filePath)

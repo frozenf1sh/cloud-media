@@ -11,7 +11,7 @@ type FFprobe struct {
 	path string
 }
 
-// NewFFprobe 创建 FFprobe 实例
+// NewFFprobe 创建 FFprobe 实例，自动查找系统中的 ffprobe 可执行文件
 func NewFFprobe() (*FFprobe, error) {
 	path, err := exec.LookPath("ffprobe")
 	if err != nil {
@@ -25,7 +25,7 @@ func (f *FFprobe) Path() string {
 	return f.path
 }
 
-// Command 创建 FFprobe 命令
+// Command 创建 FFprobe 命令，返回 *exec.Cmd
 func (f *FFprobe) Command(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, f.path, args...)
 }
